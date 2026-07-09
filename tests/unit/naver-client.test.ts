@@ -189,6 +189,22 @@ describe("LiveNaverCommerceClient", () => {
     await expect(client.searchProducts(store)).rejects.toThrow(/contents/);
   });
 
+  it("fails closed when a search content entry is missing channelProducts", async () => {
+    const queuedFetch = createQueuedFetch([
+      tokenResponse("access-token"),
+      searchResponse({
+        contents: [{ originProductNo: 1001 }],
+        last: true,
+      }),
+    ]);
+    const client = new LiveNaverCommerceClient({
+      baseUrl: "https://api.example.com",
+      fetchImpl: queuedFetch.fetchImpl,
+    });
+
+    await expect(client.searchProducts(store)).rejects.toThrow(/channelProducts/);
+  });
+
   it("fails closed when search pagination signal is missing", async () => {
     const queuedFetch = createQueuedFetch([
       tokenResponse("access-token"),
