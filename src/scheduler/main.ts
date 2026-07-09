@@ -20,7 +20,11 @@ function main(): void {
       : new MockNaverCommerceClient();
   const sheetRepository =
     env.naverApiMode === "live"
-      ? new GoogleSheetRepository(env.googleSheetsSpreadsheetId)
+      ? new GoogleSheetRepository({
+          spreadsheetId: env.googleSheetsSpreadsheetId,
+          credentialsFile: env.googleApplicationCredentials,
+          serviceAccountJsonBase64: env.googleServiceAccountJsonBase64,
+        })
       : new InMemorySheetRepository();
   const secrets = runtimeSecrets(env);
 
