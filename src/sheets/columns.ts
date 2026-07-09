@@ -6,8 +6,23 @@ export type RawDataColumn = keyof SheetProductRow;
 
 export interface SheetTabDefinition {
   readonly title: string;
-  readonly legacyTitle: string;
+  readonly legacyTitles: readonly string[];
   readonly columnCount: number;
+}
+
+export interface SheetTabNames {
+  readonly rawData: string;
+  readonly storeAView: string;
+  readonly storeBView: string;
+  readonly acrossStoresDuplicates: string;
+  readonly sameStoreDuplicates: string;
+  readonly extractionFailures: string;
+  readonly runLog: string;
+}
+
+export interface ManagedSheetTabs {
+  readonly names: SheetTabNames;
+  readonly definitions: readonly SheetTabDefinition[];
 }
 
 export const RAW_DATA_TAB = "원본 데이터";
@@ -43,8 +58,8 @@ export const RAW_DATA_COLUMNS: RawDataColumn[] = [
 ];
 
 const RAW_DATA_HEADER_BY_COLUMN: Record<RawDataColumn, string> = {
-  storeKey: "스토어 구분",
-  storeName: "스토어 이름",
+  storeKey: "내부 스토어 코드",
+  storeName: "스토어 표시명",
   storeBaseUrl: "스토어 주소",
   channelProductNo: "채널 상품번호",
   originProductNo: "원상품번호",
@@ -93,27 +108,61 @@ export const RUN_LOG_HEADERS: string[] = [
   "실행 결과",
 ];
 
-export const SHEET_TABS: SheetTabDefinition[] = [
-  { title: RAW_DATA_TAB, legacyTitle: "RawData", columnCount: RAW_DATA_COLUMNS.length },
-  { title: A_STORE_VIEW_TAB, legacyTitle: "A_Store_View", columnCount: RAW_DATA_COLUMNS.length },
-  { title: B_STORE_VIEW_TAB, legacyTitle: "B_Store_View", columnCount: RAW_DATA_COLUMNS.length },
-  {
-    title: ACROSS_STORES_DUPLICATES_TAB,
-    legacyTitle: "Across_Stores_Duplicates",
-    columnCount: RAW_DATA_COLUMNS.length,
-  },
-  {
-    title: SAME_STORE_DUPLICATES_TAB,
-    legacyTitle: "Same_Store_Duplicates",
-    columnCount: RAW_DATA_COLUMNS.length,
-  },
-  {
-    title: EXTRACTION_FAILURES_TAB,
-    legacyTitle: "Extraction_Failures",
-    columnCount: RAW_DATA_COLUMNS.length,
-  },
-  { title: RUN_LOG_TAB, legacyTitle: "RunLog", columnCount: RUN_LOG_HEADERS.length },
-];
+export function createManagedSheetTabs(
+  storeADisplayName: string,
+  storeBDisplayName: string,
+): ManagedSheetTabs {
+  const names: SheetTabNames = {
+    rawData: RAW_DATA_TAB,
+    storeAView: sheetTitle(storeADisplayName, "매물"),
+    storeBView: sheetTitle(storeBDisplayName, "매물"),
+    acrossStoresDuplicates: sheetTitle(`${storeADisplayName}·${storeBDisplayName}`, "공통 매물"),
+    sameStoreDuplicates: SAME_STORE_DUPLICATES_TAB,
+    extractionFailures: EXTRACTION_FAILURES_TAB,
+    runLog: RUN_LOG_TAB,
+  };
+
+  return {
+    names,
+    definitions: [
+      {
+        title: names.rawData,
+        legacyTitles: ["RawData"],
+        columnCount: RAW_DATA_COLUMNS.length,
+      },
+      {
+        title: names.storeAView,
+        legacyTitles: [A_STORE_VIEW_TAB, "A_Store_View"],
+        columnCount: RAW_DATA_COLUMNS.length,
+      },
+      {
+        title: names.storeBView,
+        legacyTitles: [B_STORE_VIEW_TAB, "B_Store_View"],
+        columnCount: RAW_DATA_COLUMNS.length,
+      },
+      {
+        title: names.acrossStoresDuplicates,
+        legacyTitles: [ACROSS_STORES_DUPLICATES_TAB, "Across_Stores_Duplicates"],
+        columnCount: RAW_DATA_COLUMNS.length,
+      },
+      {
+        title: names.sameStoreDuplicates,
+        legacyTitles: ["Same_Store_Duplicates"],
+        columnCount: RAW_DATA_COLUMNS.length,
+      },
+      {
+        title: names.extractionFailures,
+        legacyTitles: ["Extraction_Failures"],
+        columnCount: RAW_DATA_COLUMNS.length,
+      },
+      {
+        title: names.runLog,
+        legacyTitles: ["RunLog"],
+        columnCount: RUN_LOG_HEADERS.length,
+      },
+    ],
+  };
+}
 
 export function parseStoreKey(value: string): SheetProductRow["storeKey"] {
   if (value === "A" || value === "B") {
@@ -207,4 +256,16 @@ function valueForSheet(row: SheetProductRow, column: RawDataColumn): string {
   }
 
   return row[column];
+}
+
+function sheetTitle(prefix: string, suffix: string): string {
+  const normalizedPrefix = prefix
+    .replace(/[:\\/?*[\]]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const safePrefix = normalizedPrefix.length > 0 ? normalizedPrefix : "스토어";
+  const suffixWithSpace = ` ${suffix}`;
+  const maxPrefixCharacters = 100 - Array.from(suffixWithSpace).length;
+
+  return `${Array.from(safePrefix).slice(0, maxPrefixCharacters).join("")}${suffixWithSpace}`;
 }

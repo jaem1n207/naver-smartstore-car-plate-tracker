@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DuplicateStatus } from "../../src/domain/duplicates/types.js";
 import type { PlateExtractionStatus } from "../../src/domain/plate/types.js";
 import {
+  createManagedSheetTabs,
   RAW_DATA_COLUMNS,
   RAW_DATA_HEADERS,
   sheetProductRowToValues,
@@ -64,8 +65,8 @@ describe("sheet row column helpers", () => {
 
   it("uses Korean headers for every canonical column", () => {
     expect(RAW_DATA_HEADERS).toEqual([
-      "스토어 구분",
-      "스토어 이름",
+      "내부 스토어 코드",
+      "스토어 표시명",
       "스토어 주소",
       "채널 상품번호",
       "원상품번호",
@@ -86,6 +87,27 @@ describe("sheet row column helpers", () => {
       "API 추적 ID",
       "관리자 메모",
     ]);
+  });
+
+  it("uses configured store display names in operator-facing tab titles", () => {
+    const tabs = createManagedSheetTabs("동부트럭 (store-east)", "서부트럭 (store-west)");
+
+    expect(tabs.names.storeAView).toBe("동부트럭 (store-east) 매물");
+    expect(tabs.names.storeBView).toBe("서부트럭 (store-west) 매물");
+    expect(tabs.names.acrossStoresDuplicates).toBe(
+      "동부트럭 (store-east)·서부트럭 (store-west) 공통 매물",
+    );
+    expect(tabs.definitions[1]?.legacyTitles).toEqual(["A스토어 매물", "A_Store_View"]);
+    expect(tabs.definitions[2]?.legacyTitles).toEqual(["B스토어 매물", "B_Store_View"]);
+  });
+
+  it("sanitizes invalid Google Sheets title characters and caps title length", () => {
+    const longName = "가".repeat(120);
+    const tabs = createManagedSheetTabs("동부/트럭", longName);
+
+    expect(tabs.names.storeAView).toBe("동부 트럭 매물");
+    expect(Array.from(tabs.names.storeBView)).toHaveLength(100);
+    expect(tabs.names.storeBView.endsWith(" 매물")).toBe(true);
   });
 
   it("continues to parse legacy English status values", () => {
