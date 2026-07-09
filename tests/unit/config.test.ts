@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadEnv } from "../../src/config/env.js";
-import { loadStores } from "../../src/config/stores.js";
+import { createStoreDisplayName, loadStores } from "../../src/config/stores.js";
 
 const baseEnv = {
   NODE_ENV: "test",
@@ -98,6 +98,7 @@ describe("loadStores", () => {
       {
         storeKey: "A",
         storeName: "Store A",
+        storeDisplayName: "Store A (store-a)",
         storeBaseUrl: "https://example.com/store-a",
         clientId: "store-a-client",
         clientSecret: "store-a-secret",
@@ -106,11 +107,21 @@ describe("loadStores", () => {
       {
         storeKey: "B",
         storeName: "Store B",
+        storeDisplayName: "Store B (store-b)",
         storeBaseUrl: "https://example.com/store-b",
         clientId: "store-b-client",
         clientSecret: "store-b-secret",
         accountId: "store-b-account",
       },
     ]);
+  });
+
+  it("builds a human-readable store label from the configured name and URL slug", () => {
+    expect(createStoreDisplayName("동부트럭", "https://example.com/store-east/")).toBe(
+      "동부트럭 (store-east)",
+    );
+    expect(createStoreDisplayName("동부트럭 (store-east)", "https://example.com/store-east")).toBe(
+      "동부트럭 (store-east)",
+    );
   });
 });

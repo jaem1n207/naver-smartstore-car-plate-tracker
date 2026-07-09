@@ -21,6 +21,7 @@ const SearchRequestBodySchema = z.object({
 const store: StoreConfig = {
   storeKey: "A",
   storeName: "Store A",
+  storeDisplayName: "Store A (store-a)",
   storeBaseUrl: "https://example.com/store-a",
   clientId: "store-a-client",
   clientSecret: "$2a$04$abcdefghijklmnopqrstuu",

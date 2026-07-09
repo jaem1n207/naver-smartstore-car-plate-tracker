@@ -9,6 +9,7 @@ import { MockNaverCommerceClient } from "../../src/naver/mock-client.js";
 const storeA: StoreConfig = {
   storeKey: "A",
   storeName: "Store A",
+  storeDisplayName: "Store A (store-a)",
   storeBaseUrl: "https://example.com/store-a",
   clientId: "store-a-client",
   clientSecret: "store-a-secret",
@@ -18,6 +19,7 @@ const storeA: StoreConfig = {
 const storeB: StoreConfig = {
   storeKey: "B",
   storeName: "Store B",
+  storeDisplayName: "Store B (store-b)",
   storeBaseUrl: "https://example.com/store-b",
   clientId: "store-b-client",
   clientSecret: "store-b-secret",
