@@ -3,9 +3,9 @@ import he from "he";
 import { isSupportedPlate, normalizePlateCandidate } from "./normalize.js";
 import type { PlateExtractionResult } from "./types.js";
 
-const NO_TEXT_PLATE_MESSAGE = "No text vehicle plate candidate found";
-const INVALID_LABEL_NEAR_MESSAGE = "Label-near vehicle plate value did not match supported format";
-const AMBIGUOUS_PLATE_MESSAGE = "Multiple different vehicle plate candidates found";
+const NO_TEXT_PLATE_MESSAGE = "텍스트에서 차량번호 후보를 찾지 못했습니다";
+const INVALID_LABEL_NEAR_MESSAGE = "차량번호 항목 근처 값이 지원 형식과 일치하지 않습니다";
+const AMBIGUOUS_PLATE_MESSAGE = "서로 다른 차량번호 후보가 여러 개 발견되었습니다";
 
 const PLATE_CANDIDATE_PATTERN =
   /(?<![0-9])(?:[0-9]{2,3}[\s\-_.:|/\\]*[가-힣][\s\-_.:|/\\]*[0-9]{4})(?![0-9])/gu;

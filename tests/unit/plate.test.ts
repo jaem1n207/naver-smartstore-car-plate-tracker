@@ -62,7 +62,7 @@ describe("extractPlateFromHtml", () => {
     expect(result).toEqual({
       status: "not_found",
       candidates: [],
-      message: "No text vehicle plate candidate found",
+      message: "텍스트에서 차량번호 후보를 찾지 못했습니다",
     });
   });
 
@@ -72,7 +72,7 @@ describe("extractPlateFromHtml", () => {
     expect(result).toEqual({
       status: "ambiguous",
       candidates: ["123가4567", "234나5678"],
-      message: "Multiple different vehicle plate candidates found",
+      message: "서로 다른 차량번호 후보가 여러 개 발견되었습니다",
     });
   });
 
@@ -83,7 +83,7 @@ describe("extractPlateFromHtml", () => {
       status: "invalid_format",
       rawPlate: "12가456",
       candidates: [],
-      message: "Label-near vehicle plate value did not match supported format",
+      message: "차량번호 항목 근처 값이 지원 형식과 일치하지 않습니다",
     });
   });
 
@@ -105,7 +105,7 @@ describe("extractPlateFromHtml", () => {
       status: "invalid_format",
       rawPlate: "1가2345",
       candidates: [],
-      message: "Label-near vehicle plate value did not match supported format",
+      message: "차량번호 항목 근처 값이 지원 형식과 일치하지 않습니다",
     });
   });
 });
