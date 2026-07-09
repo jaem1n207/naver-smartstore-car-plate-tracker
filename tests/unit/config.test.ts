@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadEnv } from "../../src/config/env.js";
+import { loadStores } from "../../src/config/stores.js";
 
 const baseEnv = {
   NODE_ENV: "test",
@@ -34,5 +35,14 @@ describe("loadEnv", () => {
     expect(() =>
       loadEnv({ ...baseEnv, NAVER_API_MODE: "live", ALLOW_LIVE_NAVER_API: "false" }),
     ).toThrow("Live Naver API mode requires ALLOW_LIVE_NAVER_API=true");
+  });
+});
+
+describe("loadStores", () => {
+  it("builds two store configs", () => {
+    const stores = loadStores(loadEnv(baseEnv));
+
+    expect(stores).toHaveLength(2);
+    expect(stores.map((store) => store.storeKey)).toEqual(["A", "B"]);
   });
 });
