@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  ACROSS_STORES_DUPLICATES_TAB,
+  EXTRACTION_FAILURES_TAB,
+  SAME_STORE_DUPLICATES_TAB,
+} from "../../src/sheets/columns.js";
 import { InMemorySheetRepository } from "../../src/sheets/in-memory-repository.js";
 import type { SheetProductRow } from "../../src/sheets/types.js";
 
@@ -39,9 +44,9 @@ describe("InMemorySheetRepository", () => {
     await repository.writeViews([baseRow, deletedRow]);
 
     expect(Object.values(repository.viewRows).every((rows) => rows.length <= 1)).toBe(true);
-    expect(repository.viewRows.Extraction_Failures).toEqual([]);
-    expect(repository.viewRows.Across_Stores_Duplicates).toEqual([]);
-    expect(repository.viewRows.Same_Store_Duplicates).toEqual([]);
+    expect(repository.viewRows[EXTRACTION_FAILURES_TAB]).toEqual([]);
+    expect(repository.viewRows[ACROSS_STORES_DUPLICATES_TAB]).toEqual([]);
+    expect(repository.viewRows[SAME_STORE_DUPLICATES_TAB]).toEqual([]);
   });
 
   it("clones rows at repository boundaries", async () => {

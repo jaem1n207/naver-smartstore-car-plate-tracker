@@ -1,4 +1,11 @@
 import type { DuplicateStatus } from "../domain/duplicates/types.js";
+import {
+  ACROSS_STORES_DUPLICATES_TAB,
+  A_STORE_VIEW_TAB,
+  B_STORE_VIEW_TAB,
+  EXTRACTION_FAILURES_TAB,
+  SAME_STORE_DUPLICATES_TAB,
+} from "./columns.js";
 import type { RunLogRow, SheetProductRow, SheetRepository } from "./types.js";
 
 export class InMemorySheetRepository implements SheetRepository {
@@ -20,11 +27,11 @@ export class InMemorySheetRepository implements SheetRepository {
     const activeRows = rows.filter((row) => row.productStatus !== "DELETE");
 
     this.viewRows = {
-      A_Store_View: cloneRows(activeRows.filter(isStoreARow)),
-      B_Store_View: cloneRows(activeRows.filter(isStoreBRow)),
-      Across_Stores_Duplicates: cloneRows(activeRows.filter(hasAcrossStoresDuplicate)),
-      Same_Store_Duplicates: cloneRows(activeRows.filter(hasSameStoreDuplicate)),
-      Extraction_Failures: cloneRows(activeRows.filter(hasExtractionFailure)),
+      [A_STORE_VIEW_TAB]: cloneRows(activeRows.filter(isStoreARow)),
+      [B_STORE_VIEW_TAB]: cloneRows(activeRows.filter(isStoreBRow)),
+      [ACROSS_STORES_DUPLICATES_TAB]: cloneRows(activeRows.filter(hasAcrossStoresDuplicate)),
+      [SAME_STORE_DUPLICATES_TAB]: cloneRows(activeRows.filter(hasSameStoreDuplicate)),
+      [EXTRACTION_FAILURES_TAB]: cloneRows(activeRows.filter(hasExtractionFailure)),
     };
 
     return Promise.resolve();
