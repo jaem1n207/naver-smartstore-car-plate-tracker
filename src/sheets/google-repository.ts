@@ -1,33 +1,66 @@
 import { google, type sheets_v4 } from "googleapis";
+import { z } from "zod";
 import type { DuplicateStatus } from "../domain/duplicates/types.js";
-import { RAW_DATA_COLUMNS, sheetProductRowToValues, valuesToSheetProductRow } from "./columns.js";
+import {
+  ACROSS_STORES_DUPLICATES_TAB,
+  A_STORE_VIEW_TAB,
+  B_STORE_VIEW_TAB,
+  EXTRACTION_FAILURES_TAB,
+  RAW_DATA_COLUMNS,
+  RAW_DATA_HEADERS,
+  RAW_DATA_TAB,
+  RUN_LOG_HEADERS,
+  RUN_LOG_TAB,
+  SAME_STORE_DUPLICATES_TAB,
+  SHEET_TABS,
+  sheetProductRowToValues,
+  valuesToSheetProductRow,
+} from "./columns.js";
 import type { RunLogRow, SheetProductRow, SheetRepository } from "./types.js";
 
 const SPREADSHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
-const RAW_DATA_TAB = "RawData";
-const A_STORE_VIEW_TAB = "A_Store_View";
-const B_STORE_VIEW_TAB = "B_Store_View";
-const ACROSS_STORES_DUPLICATES_TAB = "Across_Stores_Duplicates";
-const SAME_STORE_DUPLICATES_TAB = "Same_Store_Duplicates";
-const EXTRACTION_FAILURES_TAB = "Extraction_Failures";
-const RUN_LOG_TAB = "RunLog";
 const RAW_DATA_END_COLUMN = columnNameForColumnCount(RAW_DATA_COLUMNS.length);
+const RUN_LOG_END_COLUMN = columnNameForColumnCount(RUN_LOG_HEADERS.length);
+
+const GoogleServiceAccountCredentialsSchema = z.object({
+  type: z.literal("service_account"),
+  project_id: z.string().trim().min(1),
+  private_key_id: z.string().trim().min(1),
+  private_key: z.string().min(1),
+  client_email: z.email(),
+  client_id: z.string().trim().min(1),
+});
+
+export interface GoogleSheetRepositoryOptions {
+  readonly spreadsheetId: string;
+  readonly credentialsFile?: string | undefined;
+  readonly serviceAccountJsonBase64?: string | undefined;
+}
 
 export class GoogleSheetRepository implements SheetRepository {
+  private readonly spreadsheetId: string;
   private readonly sheets: sheets_v4.Sheets;
+  private initializeTabsPromise: Promise<void> | undefined;
 
-  constructor(private readonly spreadsheetId: string) {
+  constructor(options: GoogleSheetRepositoryOptions) {
+    this.spreadsheetId = options.spreadsheetId;
+
+    const credentials = decodeServiceAccountCredentials(options.serviceAccountJsonBase64);
     const auth = new google.auth.GoogleAuth({
       scopes: [SPREADSHEETS_SCOPE],
+      ...(options.credentialsFile === undefined ? {} : { keyFile: options.credentialsFile }),
+      ...(credentials === undefined ? {} : { credentials }),
     });
 
     this.sheets = google.sheets({ version: "v4", auth });
   }
 
   async readRawData(): Promise<SheetProductRow[]> {
+    await this.ensureTabs();
+
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: `${RAW_DATA_TAB}!A2:${RAW_DATA_END_COLUMN}`,
+      range: sheetRange(RAW_DATA_TAB, `A2:${RAW_DATA_END_COLUMN}`),
     });
 
     return googleValuesToRows(response.data.values).map((row, index) =>
@@ -36,10 +69,13 @@ export class GoogleSheetRepository implements SheetRepository {
   }
 
   async writeRawData(rows: SheetProductRow[]): Promise<void> {
+    await this.ensureTabs();
     await this.replaceSheet(RAW_DATA_TAB, viewValues(rows));
   }
 
   async writeViews(rows: SheetProductRow[]): Promise<void> {
+    await this.ensureTabs();
+
     const activeRows = rows.filter(isActiveProductRow);
 
     await this.replaceSheet(A_STORE_VIEW_TAB, viewValues(activeRows.filter(isStoreARow)));
@@ -59,9 +95,18 @@ export class GoogleSheetRepository implements SheetRepository {
   }
 
   async appendRunLog(row: RunLogRow): Promise<void> {
+    await this.ensureTabs();
+    await this.sheets.spreadsheets.values.update({
+      spreadsheetId: this.spreadsheetId,
+      range: sheetRange(RUN_LOG_TAB, `A1:${RUN_LOG_END_COLUMN}1`),
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [RUN_LOG_HEADERS],
+      },
+    });
     await this.sheets.spreadsheets.values.append({
       spreadsheetId: this.spreadsheetId,
-      range: `${RUN_LOG_TAB}!A:H`,
+      range: sheetRange(RUN_LOG_TAB, `A:${RUN_LOG_END_COLUMN}`),
       valueInputOption: "RAW",
       insertDataOption: "INSERT_ROWS",
       requestBody: {
@@ -69,7 +114,7 @@ export class GoogleSheetRepository implements SheetRepository {
           [
             row.runStartedAt,
             row.runFinishedAt,
-            row.mode,
+            runModeLabel(row.mode),
             row.totalProducts,
             row.successCount,
             row.failureCount,
@@ -81,17 +126,62 @@ export class GoogleSheetRepository implements SheetRepository {
     });
   }
 
+  private ensureTabs(): Promise<void> {
+    this.initializeTabsPromise ??= this.initializeTabs().catch((error: unknown) => {
+      this.initializeTabsPromise = undefined;
+      throw error;
+    });
+
+    return this.initializeTabsPromise;
+  }
+
+  private async initializeTabs(): Promise<void> {
+    const response = await this.sheets.spreadsheets.get({
+      spreadsheetId: this.spreadsheetId,
+      fields: "sheets.properties(sheetId,title)",
+    });
+    const sheetIdsByTitle = collectSheetIdsByTitle(response.data.sheets);
+    const requests: sheets_v4.Schema$Request[] = [];
+
+    for (const tab of SHEET_TABS) {
+      const localizedSheetId = sheetIdsByTitle.get(tab.title);
+
+      if (localizedSheetId !== undefined) {
+        requests.push(freezeHeaderRowRequest(localizedSheetId));
+        continue;
+      }
+
+      const legacySheetId = sheetIdsByTitle.get(tab.legacyTitle);
+
+      if (legacySheetId !== undefined) {
+        requests.push(renameAndFreezeSheetRequest(legacySheetId, tab.title));
+        continue;
+      }
+
+      requests.push(addSheetRequest(tab.title, tab.columnCount));
+    }
+
+    if (requests.length === 0) {
+      return;
+    }
+
+    await this.sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
+      requestBody: { requests },
+    });
+  }
+
   private async replaceSheet(tabName: string, values: string[][]): Promise<void> {
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: `${tabName}!A:${RAW_DATA_END_COLUMN}`,
+      range: sheetRange(tabName, `A:${RAW_DATA_END_COLUMN}`),
     });
     const currentRowCount = googleValuesToRows(response.data.values).length;
     const targetRowCount = Math.max(currentRowCount, values.length);
 
     await this.sheets.spreadsheets.values.update({
       spreadsheetId: this.spreadsheetId,
-      range: `${tabName}!A1:${RAW_DATA_END_COLUMN}${String(targetRowCount)}`,
+      range: sheetRange(tabName, `A1:${RAW_DATA_END_COLUMN}${String(targetRowCount)}`),
       valueInputOption: "RAW",
       requestBody: {
         values: padRows(values, targetRowCount),
@@ -101,7 +191,7 @@ export class GoogleSheetRepository implements SheetRepository {
 }
 
 function viewValues(rows: SheetProductRow[]): string[][] {
-  return [RAW_DATA_COLUMNS, ...rows.map(sheetProductRowToValues)];
+  return [RAW_DATA_HEADERS, ...rows.map(sheetProductRowToValues)];
 }
 
 function googleValuesToRows(values: unknown): unknown[][] {
@@ -121,12 +211,12 @@ function parseRawDataRow(row: unknown[], sheetRowNumber: number): SheetProductRo
     return valuesToSheetProductRow(row.map(String));
   } catch (error) {
     if (error instanceof Error) {
-      throw new Error(`${RAW_DATA_TAB} row ${String(sheetRowNumber)}: ${error.message}`, {
+      throw new Error(`${RAW_DATA_TAB} ${String(sheetRowNumber)}행: ${error.message}`, {
         cause: error,
       });
     }
 
-    throw new Error(`${RAW_DATA_TAB} row ${String(sheetRowNumber)}: Failed to parse row`, {
+    throw new Error(`${RAW_DATA_TAB} ${String(sheetRowNumber)}행을 읽지 못했습니다`, {
       cause: error,
     });
   }
@@ -157,6 +247,88 @@ function columnNameForColumnCount(columnCount: number): string {
   }
 
   return columnName;
+}
+
+function sheetRange(tabName: string, range: string): string {
+  return `'${tabName.replaceAll("'", "''")}'!${range}`;
+}
+
+function collectSheetIdsByTitle(
+  sheets: sheets_v4.Schema$Sheet[] | null | undefined,
+): Map<string, number> {
+  const sheetIdsByTitle = new Map<string, number>();
+
+  for (const sheet of sheets ?? []) {
+    const sheetId = sheet.properties?.sheetId;
+    const title = sheet.properties?.title;
+
+    if (typeof sheetId === "number" && typeof title === "string") {
+      sheetIdsByTitle.set(title, sheetId);
+    }
+  }
+
+  return sheetIdsByTitle;
+}
+
+function freezeHeaderRowRequest(sheetId: number): sheets_v4.Schema$Request {
+  return {
+    updateSheetProperties: {
+      properties: {
+        sheetId,
+        gridProperties: { frozenRowCount: 1 },
+      },
+      fields: "gridProperties.frozenRowCount",
+    },
+  };
+}
+
+function renameAndFreezeSheetRequest(sheetId: number, title: string): sheets_v4.Schema$Request {
+  return {
+    updateSheetProperties: {
+      properties: {
+        sheetId,
+        title,
+        gridProperties: { frozenRowCount: 1 },
+      },
+      fields: "title,gridProperties.frozenRowCount",
+    },
+  };
+}
+
+function addSheetRequest(title: string, columnCount: number): sheets_v4.Schema$Request {
+  return {
+    addSheet: {
+      properties: {
+        title,
+        gridProperties: {
+          columnCount,
+          frozenRowCount: 1,
+        },
+      },
+    },
+  };
+}
+
+function decodeServiceAccountCredentials(encodedJson: string | undefined) {
+  if (encodedJson === undefined) {
+    return undefined;
+  }
+
+  try {
+    const decodedJson = Buffer.from(encodedJson, "base64").toString("utf8");
+    const parsedJson: unknown = JSON.parse(decodedJson);
+
+    return GoogleServiceAccountCredentialsSchema.parse(parsedJson);
+  } catch (error) {
+    throw new Error(
+      "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 must contain a Base64-encoded Google service account JSON credential",
+      { cause: error },
+    );
+  }
+}
+
+function runModeLabel(mode: RunLogRow["mode"]): string {
+  return mode === "live" ? "실제 연동" : "모의 실행";
 }
 
 function isActiveProductRow(row: SheetProductRow): boolean {
