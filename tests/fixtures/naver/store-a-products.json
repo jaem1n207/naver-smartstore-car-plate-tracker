@@ -1,0 +1,23 @@
+[
+  {
+    "originProductNo": "1001",
+    "channelProductNo": "2001",
+    "productName": "Store A bucket truck",
+    "productStatus": "SALE",
+    "displayStatus": "ON"
+  },
+  {
+    "originProductNo": "1002",
+    "channelProductNo": "2002",
+    "productName": "Store A duplicate truck",
+    "productStatus": "SUSPENSION",
+    "displayStatus": "SUSPENSION"
+  },
+  {
+    "originProductNo": "1003",
+    "channelProductNo": "2003",
+    "productName": "Store A image only truck",
+    "productStatus": "OUTOFSTOCK",
+    "displayStatus": "ON"
+  }
+]

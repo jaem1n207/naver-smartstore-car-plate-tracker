@@ -1,0 +1,16 @@
+[
+  {
+    "originProductNo": "3001",
+    "channelProductNo": "4001",
+    "productName": "Store B same truck",
+    "productStatus": "CLOSE",
+    "displayStatus": "SUSPENSION"
+  },
+  {
+    "originProductNo": "3002",
+    "channelProductNo": "4002",
+    "productName": "Store B unique truck",
+    "productStatus": "WAIT",
+    "displayStatus": "WAIT"
+  }
+]
