@@ -49,7 +49,7 @@ Main components:
 - `SyncJob`: orchestrates the end-to-end flow.
 - `Scheduler`: cron or interval trigger for production.
 
-No database is required for MVP. Google Sheets is the source of operational visibility, and `RawData` acts as the upsert state store.
+No database is required for MVP. Google Sheets is the source of operational visibility, and `원본 데이터` acts as the upsert state store.
 
 ## 4. Google Sheets Options Comparison
 
@@ -65,7 +65,7 @@ Option B: four to five purpose-specific sheets.
 - Cons: source rows and derived views can drift unless the automation fully owns every tab.
 - Verdict: usable, but less maintainable without a raw source layer.
 
-Option C: RawData plus View sheets.
+Option C: 원본 데이터 plus View sheets.
 
 - Pros: one canonical raw table, many human-friendly views, easy debugging, easier idempotent upsert.
 - Cons: one extra raw sheet that non-developers should avoid editing.
@@ -75,16 +75,15 @@ Option C: RawData plus View sheets.
 
 Recommended tabs:
 
-- `README`: explains which tabs are automatic, which are for viewing, and how to read statuses.
-- `RawData`: canonical row per store and channel product.
-- `A_Store_View`: all non-deleted registered products for Store A.
-- `B_Store_View`: all non-deleted registered products for Store B.
-- `Across_Stores_Duplicates`: normalized plates found in both stores.
-- `Same_Store_Duplicates`: normalized plates repeated within one store.
-- `Extraction_Failures`: products where plate extraction failed or produced invalid/ambiguous output.
-- `RunLog`: one row per sync run with counts and error summary.
+- `원본 데이터`: canonical row per store and channel product.
+- `A스토어 매물`: all non-deleted registered products for Store A.
+- `B스토어 매물`: all non-deleted registered products for Store B.
+- `양쪽 스토어 중복`: normalized plates found in both stores.
+- `스토어 내부 중복`: normalized plates repeated within one store.
+- `차량번호 추출 실패`: products where plate extraction failed or produced invalid/ambiguous output.
+- `실행 기록`: one row per sync run with counts and error summary.
 
-The automation writes `RawData`, rewrites derived view tabs, and appends `RunLog`. Humans may add notes only to explicitly preserved columns such as `manualNote`.
+The automation creates the managed Korean tabs, writes `원본 데이터`, rewrites derived view tabs, and appends `실행 기록`. Humans may add notes only to the explicitly preserved `관리자 메모` column.
 
 ## 6. Data Model
 
@@ -215,12 +214,12 @@ Required setup:
 
 Write behavior:
 
-- Read current `RawData`.
+- Read current `원본 데이터`.
 - Build key `storeKey + channelProductNo`.
 - Preserve `firstSeenAt` and `manualNote` from existing rows.
 - Update sync-derived columns on every run.
 - Rewrite derived view sheets from computed current state.
-- Append one `RunLog` row per run.
+- Append one `실행 기록` row per run.
 
 Google Sheets is the human management UI, not the source for Naver API credentials or product mutation.
 
@@ -297,7 +296,7 @@ Required runtime variables:
 - `GOOGLE_SHEETS_SPREADSHEET_ID`
 - `GOOGLE_APPLICATION_CREDENTIALS` or `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`
 
-Committed `.env.example` must contain variable names only.
+Committed `.env.example` contains synthetic examples only and must never contain real identifiers or secrets.
 
 ## 15. Expected Folder Structure
 
@@ -392,5 +391,5 @@ Server smoke tests:
 5. Should deleted Naver products with status `DELETE` ever be archived into a separate view, or always ignored?
 6. How should ambiguous extraction be handled operationally: failure-only view, or manual override column?
 7. Is a five-minute sync interval enough for operations, or is one minute required after rate-limit validation?
-8. Should a product with no plate stay in `RawData` forever, or disappear if it later becomes deleted?
+8. Should a product with no plate stay in `원본 데이터` forever, or disappear if it later becomes deleted?
 9. Should view sheet names be Korean for operators, English for code stability, or both with a mapping table?
