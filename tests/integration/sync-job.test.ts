@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadEnv } from "../../src/config/env.js";
 import { loadStores } from "../../src/config/stores.js";
 import { MockNaverCommerceClient } from "../../src/naver/mock-client.js";
+import { ACROSS_STORES_DUPLICATES_TAB, EXTRACTION_FAILURES_TAB } from "../../src/sheets/columns.js";
 import { InMemorySheetRepository } from "../../src/sheets/in-memory-repository.js";
 import { runSyncJob } from "../../src/sync/sync-job.js";
 
@@ -41,9 +42,10 @@ describe("runSyncJob", () => {
     expect(result.successCount).toBe(4);
     expect(result.failureCount).toBe(1);
     expect(sheets.rawRows).toHaveLength(5);
-    expect(sheets.viewRows.Extraction_Failures).toHaveLength(1);
-    expect(sheets.viewRows.Across_Stores_Duplicates).toHaveLength(3);
+    expect(sheets.viewRows[EXTRACTION_FAILURES_TAB]).toHaveLength(1);
+    expect(sheets.viewRows[ACROSS_STORES_DUPLICATES_TAB]).toHaveLength(3);
     expect(sheets.runLogs).toHaveLength(1);
+    expect(sheets.runLogs[0]?.message).toBe("총 5개 상품 동기화 완료");
   });
 
   it("preserves firstSeenAt and manualNote during upsert", async () => {

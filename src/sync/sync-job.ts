@@ -62,7 +62,7 @@ export async function runSyncJob(dependencies: SyncJobDependencies): Promise<Syn
     runFinishedAt: dependencies.now().toISOString(),
     mode: dependencies.env.naverApiMode,
     ...result,
-    message: `Synced ${String(result.totalProducts)} products`,
+    message: `총 ${String(result.totalProducts)}개 상품 동기화 완료`,
   });
 
   return result;
