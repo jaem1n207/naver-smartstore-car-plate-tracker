@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 const RequiredText = z.string().trim().min(1);
+const OptionalText = z.preprocess(
+  (value) => (typeof value === "string" && value.trim().length === 0 ? undefined : value),
+  z.string().trim().min(1).optional(),
+);
 
 const EnvSchema = z.object({
   NODE_ENV: z.string().default("development"),
@@ -21,8 +25,8 @@ const EnvSchema = z.object({
   STORE_B_CLIENT_SECRET: RequiredText,
   STORE_B_ACCOUNT_ID: RequiredText,
   GOOGLE_SHEETS_SPREADSHEET_ID: RequiredText,
-  GOOGLE_APPLICATION_CREDENTIALS: z.string().optional(),
-  GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: z.string().optional(),
+  GOOGLE_APPLICATION_CREDENTIALS: OptionalText,
+  GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: OptionalText,
 });
 
 export type RawEnv = z.infer<typeof EnvSchema>;
@@ -57,6 +61,15 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 
   if (raw.NAVER_API_MODE === "live" && !allowLiveNaverApi) {
     throw new Error("Live Naver API mode requires ALLOW_LIVE_NAVER_API=true");
+  }
+
+  if (
+    raw.GOOGLE_APPLICATION_CREDENTIALS !== undefined &&
+    raw.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 !== undefined
+  ) {
+    throw new Error(
+      "Configure only one of GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
+    );
   }
 
   return {

@@ -65,6 +65,29 @@ describe("loadEnv", () => {
   it("rejects whitespace-only required operational text values", () => {
     expect(() => loadEnv({ ...baseEnv, STORE_A_CLIENT_SECRET: "   " })).toThrow();
   });
+
+  it("treats blank optional Google credential values as unset", () => {
+    const env = loadEnv({
+      ...baseEnv,
+      GOOGLE_APPLICATION_CREDENTIALS: "  ",
+      GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: "",
+    });
+
+    expect(env.googleApplicationCredentials).toBeUndefined();
+    expect(env.googleServiceAccountJsonBase64).toBeUndefined();
+  });
+
+  it("rejects ambiguous Google credential sources", () => {
+    expect(() =>
+      loadEnv({
+        ...baseEnv,
+        GOOGLE_APPLICATION_CREDENTIALS: "/secure/service-account.json",
+        GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: "encoded-json",
+      }),
+    ).toThrow(
+      "Configure only one of GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
+    );
+  });
 });
 
 describe("loadStores", () => {
