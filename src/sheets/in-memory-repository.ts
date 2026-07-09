@@ -17,12 +17,14 @@ export class InMemorySheetRepository implements SheetRepository {
   }
 
   writeViews(rows: SheetProductRow[]): Promise<void> {
+    const activeRows = rows.filter((row) => row.productStatus !== "DELETE");
+
     this.viewRows = {
-      A_Store_View: cloneRows(rows.filter(isActiveStoreARow)),
-      B_Store_View: cloneRows(rows.filter(isActiveStoreBRow)),
-      Across_Stores_Duplicates: cloneRows(rows.filter(hasAcrossStoresDuplicate)),
-      Same_Store_Duplicates: cloneRows(rows.filter(hasSameStoreDuplicate)),
-      Extraction_Failures: cloneRows(rows.filter(hasExtractionFailure)),
+      A_Store_View: cloneRows(activeRows.filter(isStoreARow)),
+      B_Store_View: cloneRows(activeRows.filter(isStoreBRow)),
+      Across_Stores_Duplicates: cloneRows(activeRows.filter(hasAcrossStoresDuplicate)),
+      Same_Store_Duplicates: cloneRows(activeRows.filter(hasSameStoreDuplicate)),
+      Extraction_Failures: cloneRows(activeRows.filter(hasExtractionFailure)),
     };
 
     return Promise.resolve();
@@ -39,12 +41,12 @@ function cloneRows(rows: SheetProductRow[]): SheetProductRow[] {
   return structuredClone(rows);
 }
 
-function isActiveStoreARow(row: SheetProductRow): boolean {
-  return row.storeKey === "A" && row.productStatus !== "DELETE";
+function isStoreARow(row: SheetProductRow): boolean {
+  return row.storeKey === "A";
 }
 
-function isActiveStoreBRow(row: SheetProductRow): boolean {
-  return row.storeKey === "B" && row.productStatus !== "DELETE";
+function isStoreBRow(row: SheetProductRow): boolean {
+  return row.storeKey === "B";
 }
 
 function hasAcrossStoresDuplicate(row: SheetProductRow): boolean {

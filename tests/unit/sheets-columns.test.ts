@@ -38,6 +38,29 @@ describe("sheet row column helpers", () => {
   });
 
   it("keeps column coverage aligned with SheetProductRow keys", () => {
+    expect(RAW_DATA_COLUMNS).toEqual([
+      "storeKey",
+      "storeName",
+      "storeBaseUrl",
+      "channelProductNo",
+      "originProductNo",
+      "productUrl",
+      "productName",
+      "productStatus",
+      "displayStatus",
+      "rawPlate",
+      "normalizedPlate",
+      "extractionStatus",
+      "duplicateStatus",
+      "firstSeenAt",
+      "lastSyncedAt",
+      "lastErrorAt",
+      "errorMessage",
+      "detailContentHash",
+      "detailTextSnippet",
+      "apiTraceId",
+      "manualNote",
+    ]);
     expect([...RAW_DATA_COLUMNS].sort()).toEqual(Object.keys(baseRow).sort());
   });
 
