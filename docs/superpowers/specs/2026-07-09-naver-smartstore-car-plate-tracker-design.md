@@ -76,9 +76,9 @@ Option C: 원본 데이터 plus View sheets.
 Recommended tabs:
 
 - `원본 데이터`: canonical row per store and channel product.
-- `A스토어 매물`: all non-deleted registered products for Store A.
-- `B스토어 매물`: all non-deleted registered products for Store B.
-- `양쪽 스토어 중복`: normalized plates found in both stores.
+- `<첫 번째 스토어 표시명> 매물`: all non-deleted registered products for the first store.
+- `<두 번째 스토어 표시명> 매물`: all non-deleted registered products for the second store.
+- `<두 스토어 표시명> 공통 매물`: normalized plates found in both stores.
 - `스토어 내부 중복`: normalized plates repeated within one store.
 - `차량번호 추출 실패`: products where plate extraction failed or produced invalid/ambiguous output.
 - `실행 기록`: one row per sync run with counts and error summary.
@@ -90,7 +90,7 @@ The automation creates the managed Korean tabs, writes `원본 데이터`, rewri
 Required columns:
 
 - `storeKey`: stable internal key such as `A` or `B`.
-- `storeName`: display name from runtime config, not hardcoded in source.
+- `storeName`: human-readable `configured name (URL slug)` label, not hardcoded in source.
 - `channelProductNo`: Naver channel product number.
 - `originProductNo`: Naver origin product number, if present.
 - `productUrl`: generated from configured store URL and product number.

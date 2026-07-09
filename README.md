@@ -52,14 +52,14 @@ All registered non-deleted products are included regardless of sale or display s
 
 ## Google Sheets Tabs
 
-The worker creates missing tabs automatically, freezes the first row, and writes Korean headers and status labels. Existing legacy English tabs are renamed in place when the Korean tab does not already exist.
+The worker creates missing tabs automatically, freezes the first row, and writes Korean headers and status labels. Store-facing tab names are generated from each configured store name and Smartstore URL slug, such as `동부트럭 (store-east) 매물`. Existing generic Korean or legacy English tabs are renamed in place when the configured tab does not already exist.
 
 - `원본 데이터`
-- `A스토어 매물`
-- `B스토어 매물`
-- `양쪽 스토어 중복`
+- `<첫 번째 스토어 표시명> 매물`
+- `<두 번째 스토어 표시명> 매물`
+- `<두 스토어 표시명> 공통 매물`
 - `스토어 내부 중복`
 - `차량번호 추출 실패`
 - `실행 기록`
 
-Naver's original product and display status codes remain unchanged so operators can compare them directly with the API source.
+The internal `A` and `B` keys remain only for stable duplicate analysis. Rows expose `스토어 표시명`, and Naver's original product and display status codes remain unchanged so operators can compare them directly with the API source.
