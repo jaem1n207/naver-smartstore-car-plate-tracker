@@ -27,7 +27,7 @@ export class GoogleSheetRepository implements SheetRepository {
   async readRawData(): Promise<SheetProductRow[]> {
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: `${RAW_DATA_TAB}!A2:U`,
+      range: `${RAW_DATA_TAB}!A2:${RAW_DATA_END_COLUMN}`,
     });
 
     return googleValuesToRows(response.data.values).map((row, index) =>
