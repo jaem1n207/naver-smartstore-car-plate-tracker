@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const RequiredText = z.string().trim().min(1);
+
 const EnvSchema = z.object({
   NODE_ENV: z.string().default("development"),
   TZ: z.string().default("Asia/Seoul"),
@@ -8,17 +10,17 @@ const EnvSchema = z.object({
   ALLOW_LIVE_NAVER_API: z.enum(["true", "false"]).default("false"),
   NAVER_API_BASE_URL: z.url().default("https://api.commerce.naver.com/external"),
   SYNC_CRON: z.string().default("*/5 * * * *"),
-  STORE_A_NAME: z.string().min(1),
+  STORE_A_NAME: RequiredText,
   STORE_A_BASE_URL: z.url(),
-  STORE_A_CLIENT_ID: z.string().min(1),
-  STORE_A_CLIENT_SECRET: z.string().min(1),
-  STORE_A_ACCOUNT_ID: z.string().min(1),
-  STORE_B_NAME: z.string().min(1),
+  STORE_A_CLIENT_ID: RequiredText,
+  STORE_A_CLIENT_SECRET: RequiredText,
+  STORE_A_ACCOUNT_ID: RequiredText,
+  STORE_B_NAME: RequiredText,
   STORE_B_BASE_URL: z.url(),
-  STORE_B_CLIENT_ID: z.string().min(1),
-  STORE_B_CLIENT_SECRET: z.string().min(1),
-  STORE_B_ACCOUNT_ID: z.string().min(1),
-  GOOGLE_SHEETS_SPREADSHEET_ID: z.string().min(1),
+  STORE_B_CLIENT_ID: RequiredText,
+  STORE_B_CLIENT_SECRET: RequiredText,
+  STORE_B_ACCOUNT_ID: RequiredText,
+  GOOGLE_SHEETS_SPREADSHEET_ID: RequiredText,
   GOOGLE_APPLICATION_CREDENTIALS: z.string().optional(),
   GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: z.string().optional(),
 });

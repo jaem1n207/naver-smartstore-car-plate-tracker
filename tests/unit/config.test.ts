@@ -36,13 +36,58 @@ describe("loadEnv", () => {
       loadEnv({ ...baseEnv, NAVER_API_MODE: "live", ALLOW_LIVE_NAVER_API: "false" }),
     ).toThrow("Live Naver API mode requires ALLOW_LIVE_NAVER_API=true");
   });
+
+  it("trims required operational text values", () => {
+    const env = loadEnv({
+      ...baseEnv,
+      STORE_A_NAME: " Store A ",
+      STORE_A_CLIENT_ID: " store-a-client ",
+      STORE_A_CLIENT_SECRET: " store-a-secret ",
+      STORE_A_ACCOUNT_ID: " store-a-account ",
+      STORE_B_NAME: " Store B ",
+      STORE_B_CLIENT_ID: " store-b-client ",
+      STORE_B_CLIENT_SECRET: " store-b-secret ",
+      STORE_B_ACCOUNT_ID: " store-b-account ",
+      GOOGLE_SHEETS_SPREADSHEET_ID: " spreadsheet-id ",
+    });
+
+    expect(env.storeAName).toBe("Store A");
+    expect(env.storeAClientId).toBe("store-a-client");
+    expect(env.storeAClientSecret).toBe("store-a-secret");
+    expect(env.storeAAccountId).toBe("store-a-account");
+    expect(env.storeBName).toBe("Store B");
+    expect(env.storeBClientId).toBe("store-b-client");
+    expect(env.storeBClientSecret).toBe("store-b-secret");
+    expect(env.storeBAccountId).toBe("store-b-account");
+    expect(env.googleSheetsSpreadsheetId).toBe("spreadsheet-id");
+  });
+
+  it("rejects whitespace-only required operational text values", () => {
+    expect(() => loadEnv({ ...baseEnv, STORE_A_CLIENT_SECRET: "   " })).toThrow();
+  });
 });
 
 describe("loadStores", () => {
   it("builds two store configs", () => {
     const stores = loadStores(loadEnv(baseEnv));
 
-    expect(stores).toHaveLength(2);
-    expect(stores.map((store) => store.storeKey)).toEqual(["A", "B"]);
+    expect(stores).toEqual([
+      {
+        storeKey: "A",
+        storeName: "Store A",
+        storeBaseUrl: "https://example.com/store-a",
+        clientId: "store-a-client",
+        clientSecret: "store-a-secret",
+        accountId: "store-a-account",
+      },
+      {
+        storeKey: "B",
+        storeName: "Store B",
+        storeBaseUrl: "https://example.com/store-b",
+        clientId: "store-b-client",
+        clientSecret: "store-b-secret",
+        accountId: "store-b-account",
+      },
+    ]);
   });
 });
