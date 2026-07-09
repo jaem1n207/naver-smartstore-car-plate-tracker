@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { DuplicateStatus } from "../../src/domain/duplicates/types.js";
+import type { PlateExtractionStatus } from "../../src/domain/plate/types.js";
 import {
   RAW_DATA_COLUMNS,
+  RAW_DATA_HEADERS,
   sheetProductRowToValues,
   valuesToSheetProductRow,
 } from "../../src/sheets/columns.js";
@@ -30,11 +33,88 @@ const baseRow: SheetProductRow = {
   manualNote: "note",
 };
 
+const extractionStatusCases: Array<{
+  status: PlateExtractionStatus;
+  label: string;
+}> = [
+  { status: "success", label: "성공" },
+  { status: "not_found", label: "찾지 못함" },
+  { status: "invalid_format", label: "형식 오류" },
+  { status: "ambiguous", label: "여러 후보" },
+];
+
+const duplicateStatusCases: Array<{
+  status: DuplicateStatus;
+  label: string;
+}> = [
+  { status: "unique", label: "중복 없음" },
+  { status: "duplicated_in_same_store", label: "스토어 내부 중복" },
+  { status: "duplicated_across_stores", label: "양쪽 스토어 중복" },
+  { status: "duplicated_both", label: "내부 및 양쪽 중복" },
+];
+
 describe("sheet row column helpers", () => {
   it("round-trips a row through canonical values", () => {
     const values = sheetProductRowToValues(baseRow);
 
     expect(valuesToSheetProductRow(values)).toEqual(baseRow);
+    expect(values[11]).toBe("성공");
+    expect(values[12]).toBe("중복 없음");
+  });
+
+  it("uses Korean headers for every canonical column", () => {
+    expect(RAW_DATA_HEADERS).toEqual([
+      "스토어 구분",
+      "스토어 이름",
+      "스토어 주소",
+      "채널 상품번호",
+      "원상품번호",
+      "상품 URL",
+      "상품명",
+      "상품 상태",
+      "전시 상태",
+      "차량번호 원본",
+      "정규화 차량번호",
+      "추출 상태",
+      "중복 상태",
+      "최초 감지일시",
+      "마지막 동기화일시",
+      "마지막 오류일시",
+      "오류 메시지",
+      "상세설명 해시",
+      "상세설명 일부",
+      "API 추적 ID",
+      "관리자 메모",
+    ]);
+  });
+
+  it("continues to parse legacy English status values", () => {
+    const values = sheetProductRowToValues(baseRow);
+    values[11] = "not_found";
+    values[12] = "duplicated_across_stores";
+
+    expect(valuesToSheetProductRow(values)).toEqual({
+      ...baseRow,
+      extractionStatus: "not_found",
+      duplicateStatus: "duplicated_across_stores",
+    });
+  });
+
+  it("round-trips every Korean extraction and duplicate status label", () => {
+    for (const extractionCase of extractionStatusCases) {
+      for (const duplicateCase of duplicateStatusCases) {
+        const row: SheetProductRow = {
+          ...baseRow,
+          extractionStatus: extractionCase.status,
+          duplicateStatus: duplicateCase.status,
+        };
+        const values = sheetProductRowToValues(row);
+
+        expect(values[11]).toBe(extractionCase.label);
+        expect(values[12]).toBe(duplicateCase.label);
+        expect(valuesToSheetProductRow(values)).toEqual(row);
+      }
+    }
   });
 
   it("keeps column coverage aligned with SheetProductRow keys", () => {
