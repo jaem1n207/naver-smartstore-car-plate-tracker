@@ -18,7 +18,7 @@ export const DetailFixtureSchema = z.record(z.string(), z.string());
 export type NaverProductSummary = z.infer<typeof NaverProductSummarySchema>;
 export type NaverProductDetail = z.infer<typeof NaverProductDetailSchema>;
 
-export type NaverCommerceClient = {
+export interface NaverCommerceClient {
   searchProducts(store: StoreConfig): Promise<NaverProductSummary[]>;
   getProductDetail(store: StoreConfig, channelProductNo: string): Promise<NaverProductDetail>;
-};
+}
