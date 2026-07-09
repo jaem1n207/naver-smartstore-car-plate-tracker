@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createManagedSheetTabs,
   RAW_DATA_COLUMNS,
   RAW_DATA_HEADERS,
   RUN_LOG_HEADERS,
-  SHEET_TABS,
   sheetProductRowToValues,
 } from "../../src/sheets/columns.js";
+import type { SheetTabDefinition } from "../../src/sheets/columns.js";
 import type { GoogleSheetRepositoryOptions } from "../../src/sheets/google-repository.js";
 import type { SheetProductRow, SheetRepository } from "../../src/sheets/types.js";
 
@@ -176,9 +177,14 @@ const googleapisMock = vi.hoisted(() => {
       data: {
         sheets: [
           { properties: { sheetId: 1, title: "원본 데이터" } },
-          { properties: { sheetId: 2, title: "A스토어 매물" } },
-          { properties: { sheetId: 3, title: "B스토어 매물" } },
-          { properties: { sheetId: 4, title: "양쪽 스토어 중복" } },
+          { properties: { sheetId: 2, title: "동부트럭 (store-east) 매물" } },
+          { properties: { sheetId: 3, title: "서부트럭 (store-west) 매물" } },
+          {
+            properties: {
+              sheetId: 4,
+              title: "동부트럭 (store-east)·서부트럭 (store-west) 공통 매물",
+            },
+          },
           { properties: { sheetId: 5, title: "스토어 내부 중복" } },
           { properties: { sheetId: 6, title: "차량번호 추출 실패" } },
           { properties: { sheetId: 7, title: "실행 기록" } },
@@ -211,10 +217,14 @@ vi.mock("googleapis", () => ({
   google: googleapisMock.google,
 }));
 
+const STORE_A_DISPLAY_NAME = "동부트럭 (store-east)";
+const STORE_B_DISPLAY_NAME = "서부트럭 (store-west)";
+const MANAGED_TABS = createManagedSheetTabs(STORE_A_DISPLAY_NAME, STORE_B_DISPLAY_NAME);
+
 const baseRow: SheetProductRow = {
   storeKey: "A",
-  storeName: "Store A",
-  storeBaseUrl: "https://example.com/store-a",
+  storeName: STORE_A_DISPLAY_NAME,
+  storeBaseUrl: "https://example.com/store-east",
   channelProductNo: "2001",
   originProductNo: "1001",
   productUrl: "https://example.com/store-a/products/2001",
@@ -254,9 +264,9 @@ describe("GoogleSheetRepository", () => {
       },
     ]);
     const requests = only(googleapisMock.batchUpdateCalls).requestBody?.requests ?? [];
-    expect(requests).toHaveLength(SHEET_TABS.length);
+    expect(requests).toHaveLength(MANAGED_TABS.definitions.length);
     expect(requests).toEqual(
-      SHEET_TABS.map((tab) => ({
+      MANAGED_TABS.definitions.map((tab) => ({
         addSheet: {
           properties: {
             title: tab.title,
@@ -271,14 +281,35 @@ describe("GoogleSheetRepository", () => {
   });
 
   it("renames legacy English tabs to Korean without replacing their data", async () => {
-    googleapisMock.queueSpreadsheetTitles(SHEET_TABS.map((tab) => tab.legacyTitle));
+    googleapisMock.queueSpreadsheetTitles(MANAGED_TABS.definitions.map(lastLegacyTitle));
     const repository = await createRepository();
 
     await repository.readRawData();
 
     const requests = only(googleapisMock.batchUpdateCalls).requestBody?.requests ?? [];
     expect(requests).toEqual(
-      SHEET_TABS.map((tab, index) => ({
+      MANAGED_TABS.definitions.map((tab, index) => ({
+        updateSheetProperties: {
+          properties: {
+            sheetId: index + 1,
+            title: tab.title,
+            gridProperties: { frozenRowCount: 1 },
+          },
+          fields: "title,gridProperties.frozenRowCount",
+        },
+      })),
+    );
+  });
+
+  it("renames the previous generic Korean store tabs to configured store names", async () => {
+    googleapisMock.queueSpreadsheetTitles(MANAGED_TABS.definitions.map(firstLegacyTitle));
+    const repository = await createRepository();
+
+    await repository.readRawData();
+
+    const requests = only(googleapisMock.batchUpdateCalls).requestBody?.requests ?? [];
+    expect(requests).toEqual(
+      MANAGED_TABS.definitions.map((tab, index) => ({
         updateSheetProperties: {
           properties: {
             sheetId: index + 1,
@@ -364,16 +395,16 @@ describe("GoogleSheetRepository", () => {
     await repository.writeViews([baseRow]);
 
     expect(googleapisMock.valuesGetCalls.map((call) => call.range)).toEqual([
-      "'A스토어 매물'!A:U",
-      "'B스토어 매물'!A:U",
-      "'양쪽 스토어 중복'!A:U",
+      "'동부트럭 (store-east) 매물'!A:U",
+      "'서부트럭 (store-west) 매물'!A:U",
+      "'동부트럭 (store-east)·서부트럭 (store-west) 공통 매물'!A:U",
       "'스토어 내부 중복'!A:U",
       "'차량번호 추출 실패'!A:U",
     ]);
     expect(googleapisMock.updateCalls.map((call) => call.range)).toEqual([
-      "'A스토어 매물'!A1:U2",
-      "'B스토어 매물'!A1:U1",
-      "'양쪽 스토어 중복'!A1:U1",
+      "'동부트럭 (store-east) 매물'!A1:U2",
+      "'서부트럭 (store-west) 매물'!A1:U1",
+      "'동부트럭 (store-east)·서부트럭 (store-west) 공통 매물'!A1:U1",
       "'스토어 내부 중복'!A1:U1",
       "'차량번호 추출 실패'!A1:U1",
     ]);
@@ -494,9 +525,31 @@ async function createRepository(
 
   return new module.GoogleSheetRepository({
     spreadsheetId: overrides.spreadsheetId ?? "spreadsheet-id",
+    storeADisplayName: overrides.storeADisplayName ?? STORE_A_DISPLAY_NAME,
+    storeBDisplayName: overrides.storeBDisplayName ?? STORE_B_DISPLAY_NAME,
     credentialsFile: overrides.credentialsFile,
     serviceAccountJsonBase64: overrides.serviceAccountJsonBase64,
   });
+}
+
+function firstLegacyTitle(tab: SheetTabDefinition): string {
+  const title = tab.legacyTitles[0];
+
+  if (title === undefined) {
+    throw new Error(`Expected a legacy title for ${tab.title}`);
+  }
+
+  return title;
+}
+
+function lastLegacyTitle(tab: SheetTabDefinition): string {
+  const title = tab.legacyTitles.at(-1);
+
+  if (title === undefined) {
+    throw new Error(`Expected a legacy title for ${tab.title}`);
+  }
+
+  return title;
 }
 
 function blankRawDataRow(): string[] {

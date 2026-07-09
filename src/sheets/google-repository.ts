@@ -2,20 +2,16 @@ import { google, type sheets_v4 } from "googleapis";
 import { z } from "zod";
 import type { DuplicateStatus } from "../domain/duplicates/types.js";
 import {
-  ACROSS_STORES_DUPLICATES_TAB,
-  A_STORE_VIEW_TAB,
-  B_STORE_VIEW_TAB,
-  EXTRACTION_FAILURES_TAB,
+  createManagedSheetTabs,
   RAW_DATA_COLUMNS,
   RAW_DATA_HEADERS,
   RAW_DATA_TAB,
   RUN_LOG_HEADERS,
   RUN_LOG_TAB,
-  SAME_STORE_DUPLICATES_TAB,
-  SHEET_TABS,
   sheetProductRowToValues,
   valuesToSheetProductRow,
 } from "./columns.js";
+import type { SheetTabDefinition, SheetTabNames } from "./columns.js";
 import type { RunLogRow, SheetProductRow, SheetRepository } from "./types.js";
 
 const SPREADSHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
@@ -33,6 +29,8 @@ const GoogleServiceAccountCredentialsSchema = z.object({
 
 export interface GoogleSheetRepositoryOptions {
   readonly spreadsheetId: string;
+  readonly storeADisplayName: string;
+  readonly storeBDisplayName: string;
   readonly credentialsFile?: string | undefined;
   readonly serviceAccountJsonBase64?: string | undefined;
 }
@@ -40,10 +38,18 @@ export interface GoogleSheetRepositoryOptions {
 export class GoogleSheetRepository implements SheetRepository {
   private readonly spreadsheetId: string;
   private readonly sheets: sheets_v4.Sheets;
+  private readonly tabDefinitions: readonly SheetTabDefinition[];
+  private readonly tabNames: SheetTabNames;
   private initializeTabsPromise: Promise<void> | undefined;
 
   constructor(options: GoogleSheetRepositoryOptions) {
     this.spreadsheetId = options.spreadsheetId;
+    const managedTabs = createManagedSheetTabs(
+      options.storeADisplayName,
+      options.storeBDisplayName,
+    );
+    this.tabDefinitions = managedTabs.definitions;
+    this.tabNames = managedTabs.names;
 
     const credentials = decodeServiceAccountCredentials(options.serviceAccountJsonBase64);
     const auth = new google.auth.GoogleAuth({
@@ -78,18 +84,18 @@ export class GoogleSheetRepository implements SheetRepository {
 
     const activeRows = rows.filter(isActiveProductRow);
 
-    await this.replaceSheet(A_STORE_VIEW_TAB, viewValues(activeRows.filter(isStoreARow)));
-    await this.replaceSheet(B_STORE_VIEW_TAB, viewValues(activeRows.filter(isStoreBRow)));
+    await this.replaceSheet(this.tabNames.storeAView, viewValues(activeRows.filter(isStoreARow)));
+    await this.replaceSheet(this.tabNames.storeBView, viewValues(activeRows.filter(isStoreBRow)));
     await this.replaceSheet(
-      ACROSS_STORES_DUPLICATES_TAB,
+      this.tabNames.acrossStoresDuplicates,
       viewValues(activeRows.filter(hasAcrossStoresDuplicate)),
     );
     await this.replaceSheet(
-      SAME_STORE_DUPLICATES_TAB,
+      this.tabNames.sameStoreDuplicates,
       viewValues(activeRows.filter(hasSameStoreDuplicate)),
     );
     await this.replaceSheet(
-      EXTRACTION_FAILURES_TAB,
+      this.tabNames.extractionFailures,
       viewValues(activeRows.filter(hasExtractionFailure)),
     );
   }
@@ -143,7 +149,7 @@ export class GoogleSheetRepository implements SheetRepository {
     const sheetIdsByTitle = collectSheetIdsByTitle(response.data.sheets);
     const requests: sheets_v4.Schema$Request[] = [];
 
-    for (const tab of SHEET_TABS) {
+    for (const tab of this.tabDefinitions) {
       const localizedSheetId = sheetIdsByTitle.get(tab.title);
 
       if (localizedSheetId !== undefined) {
@@ -151,7 +157,7 @@ export class GoogleSheetRepository implements SheetRepository {
         continue;
       }
 
-      const legacySheetId = sheetIdsByTitle.get(tab.legacyTitle);
+      const legacySheetId = firstExistingSheetId(sheetIdsByTitle, tab.legacyTitles);
 
       if (legacySheetId !== undefined) {
         requests.push(renameAndFreezeSheetRequest(legacySheetId, tab.title));
@@ -188,6 +194,21 @@ export class GoogleSheetRepository implements SheetRepository {
       },
     });
   }
+}
+
+function firstExistingSheetId(
+  sheetIdsByTitle: ReadonlyMap<string, number>,
+  titles: readonly string[],
+): number | undefined {
+  for (const title of titles) {
+    const sheetId = sheetIdsByTitle.get(title);
+
+    if (sheetId !== undefined) {
+      return sheetId;
+    }
+  }
+
+  return undefined;
 }
 
 function viewValues(rows: SheetProductRow[]): string[][] {
