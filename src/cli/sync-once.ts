@@ -21,6 +21,8 @@ async function main(): Promise<void> {
     env.naverApiMode === "live"
       ? new GoogleSheetRepository({
           spreadsheetId: env.googleSheetsSpreadsheetId,
+          storeADisplayName: stores[0].storeDisplayName,
+          storeBDisplayName: stores[1].storeDisplayName,
           credentialsFile: env.googleApplicationCredentials,
           serviceAccountJsonBase64: env.googleServiceAccountJsonBase64,
         })
