@@ -9,8 +9,10 @@ const AMBIGUOUS_PLATE_MESSAGE = "Multiple different vehicle plate candidates fou
 
 const PLATE_CANDIDATE_PATTERN =
   /(?<![0-9])(?:[0-9]{2,3}[\s\-_.:|/\\]*[가-힣][\s\-_.:|/\\]*[0-9]{4})(?![0-9])/gu;
+const LABEL_PATTERN = /차량번호|차번|등록번호|자동차번호/gu;
+const LABEL_VALUE_SEPARATOR_PATTERN = /^[\s:：|/\\_.-]*/u;
 const LABEL_NEAR_VALUE_PATTERN =
-  /(?:차량번호|차번|등록번호|자동차번호)\s*[:：]?\s*([0-9]{2,3}(?:[\s\-_.:|/\\]*[가-힣])?(?:[\s\-_.:|/\\]*[0-9])+)/u;
+  /^[0-9]{1,4}(?:[\s\-_.:|/\\]*[가-힣])?(?:[\s\-_.:|/\\]*[0-9]{1,5})?/u;
 
 export function extractPlateFromHtml(html: string): PlateExtractionResult {
   const text = htmlToText(html);
@@ -81,9 +83,23 @@ function htmlToText(html: string): string {
 }
 
 function findLabelNearPlate(text: string): string | undefined {
-  const match = LABEL_NEAR_VALUE_PATTERN.exec(text);
+  for (const match of text.matchAll(LABEL_PATTERN)) {
+    const label = match[0];
+    const value = findImmediateLabelValue(text.slice(match.index + label.length));
 
-  return match?.[1]?.trim();
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function findImmediateLabelValue(textAfterLabel: string): string | undefined {
+  const separator = LABEL_VALUE_SEPARATOR_PATTERN.exec(textAfterLabel)?.[0] ?? "";
+  const match = LABEL_NEAR_VALUE_PATTERN.exec(textAfterLabel.slice(separator.length));
+
+  return match?.[0]?.trim();
 }
 
 function findRawCandidates(text: string): string[] {

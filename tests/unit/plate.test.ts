@@ -7,6 +7,11 @@ describe("normalizePlateCandidate", () => {
     expect(normalizePlateCandidate("123 가 4567")).toBe("123가4567");
     expect(normalizePlateCandidate("123-가-4567")).toBe("123가4567");
     expect(normalizePlateCandidate("123 | 가 | 4567")).toBe("123가4567");
+    expect(normalizePlateCandidate("123_가_4567")).toBe("123가4567");
+    expect(normalizePlateCandidate("123.가.4567")).toBe("123가4567");
+    expect(normalizePlateCandidate("123:가:4567")).toBe("123가4567");
+    expect(normalizePlateCandidate("123/가/4567")).toBe("123가4567");
+    expect(normalizePlateCandidate("123\\가\\4567")).toBe("123가4567");
   });
 });
 
@@ -32,6 +37,21 @@ describe("extractPlateFromHtml", () => {
       throw new Error(`Expected success, got ${result.status}`);
     }
     expect(result.normalizedPlate).toBe("123가4567");
+  });
+
+  it("extracts label-near plates after label separators", () => {
+    expect(extractPlateFromHtml("<p>차량번호 | 123가4567</p>")).toEqual({
+      status: "success",
+      rawPlate: "123가4567",
+      normalizedPlate: "123가4567",
+      candidates: ["123가4567"],
+    });
+    expect(extractPlateFromHtml("<p>차량번호 - 123가4567</p>")).toEqual({
+      status: "success",
+      rawPlate: "123가4567",
+      normalizedPlate: "123가4567",
+      candidates: ["123가4567"],
+    });
   });
 
   it("returns not_found when only image content exists", () => {
@@ -62,6 +82,17 @@ describe("extractPlateFromHtml", () => {
     expect(result).toEqual({
       status: "invalid_format",
       rawPlate: "12가456",
+      candidates: [],
+      message: "Label-near vehicle plate value did not match supported format",
+    });
+  });
+
+  it("returns invalid_format when a label-near value starts with too few digits", () => {
+    const result = extractPlateFromHtml("<p>차량번호 1가2345</p>");
+
+    expect(result).toEqual({
+      status: "invalid_format",
+      rawPlate: "1가2345",
       candidates: [],
       message: "Label-near vehicle plate value did not match supported format",
     });
