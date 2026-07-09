@@ -1,0 +1,56 @@
+{
+  "name": "naver-smartstore-car-plate-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.10.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "format:check": "prettier . --check",
+    "build:visual-css": "tailwindcss -i tests/visual/fixtures/sheets-view.input.css -o tests/visual/fixtures/sheets-view.css --minify",
+    "test": "pnpm test:all",
+    "test:all": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:unit && pnpm test:integration && pnpm test:e2e && pnpm test:visual",
+    "test:unit": "vitest run tests/unit --passWithNoTests",
+    "test:integration": "vitest run tests/integration --passWithNoTests",
+    "test:e2e": "playwright test tests/e2e",
+    "test:visual": "pnpm build:visual-css && playwright test tests/visual",
+    "test:watch": "vitest",
+    "sync:once": "tsx src/cli/sync-once.ts",
+    "scheduler": "tsx src/scheduler/main.ts"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.2",
+    "googleapis": "^173.0.0",
+    "he": "^1.2.0",
+    "node-cron": "^4.6.0",
+    "p-limit": "^7.3.0",
+    "pino": "^10.3.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/cli": "^4.3.2",
+    "@types/he": "^1.2.3",
+    "@types/node": "^26.1.1",
+    "@typescript-eslint/eslint-plugin": "^8.63.0",
+    "@typescript-eslint/parser": "^8.63.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.7.0",
+    "prettier": "^3.9.4",
+    "tailwindcss": "^4.3.2",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.63.0",
+    "vitest": "^4.1.10"
+  }
+}
