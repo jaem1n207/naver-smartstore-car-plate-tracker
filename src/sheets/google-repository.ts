@@ -11,6 +11,7 @@ const ACROSS_STORES_DUPLICATES_TAB = "Across_Stores_Duplicates";
 const SAME_STORE_DUPLICATES_TAB = "Same_Store_Duplicates";
 const EXTRACTION_FAILURES_TAB = "Extraction_Failures";
 const RUN_LOG_TAB = "RunLog";
+const RAW_DATA_END_COLUMN = columnNameForColumnCount(RAW_DATA_COLUMNS.length);
 
 export class GoogleSheetRepository implements SheetRepository {
   private readonly sheets: sheets_v4.Sheets;
@@ -29,8 +30,8 @@ export class GoogleSheetRepository implements SheetRepository {
       range: `${RAW_DATA_TAB}!A2:U`,
     });
 
-    return googleValuesToRows(response.data.values).map((row) =>
-      valuesToSheetProductRow(row.map(String)),
+    return googleValuesToRows(response.data.values).map((row, index) =>
+      parseRawDataRow(row, index + 2),
     );
   }
 
@@ -69,10 +70,10 @@ export class GoogleSheetRepository implements SheetRepository {
             row.runStartedAt,
             row.runFinishedAt,
             row.mode,
-            String(row.totalProducts),
-            String(row.successCount),
-            String(row.failureCount),
-            String(row.duplicateCount),
+            row.totalProducts,
+            row.successCount,
+            row.failureCount,
+            row.duplicateCount,
             row.message,
           ],
         ],
@@ -81,17 +82,19 @@ export class GoogleSheetRepository implements SheetRepository {
   }
 
   private async replaceSheet(tabName: string, values: string[][]): Promise<void> {
-    await this.sheets.spreadsheets.values.clear({
+    const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: `${tabName}!A:Z`,
+      range: `${tabName}!A:${RAW_DATA_END_COLUMN}`,
     });
+    const currentRowCount = googleValuesToRows(response.data.values).length;
+    const targetRowCount = Math.max(currentRowCount, values.length);
 
     await this.sheets.spreadsheets.values.update({
       spreadsheetId: this.spreadsheetId,
-      range: `${tabName}!A1`,
+      range: `${tabName}!A1:${RAW_DATA_END_COLUMN}${String(targetRowCount)}`,
       valueInputOption: "RAW",
       requestBody: {
-        values,
+        values: padRows(values, targetRowCount),
       },
     });
   }
@@ -111,6 +114,49 @@ function googleValuesToRows(values: unknown): unknown[][] {
 
 function isGoogleValueRow(value: unknown): value is unknown[] {
   return Array.isArray(value);
+}
+
+function parseRawDataRow(row: unknown[], sheetRowNumber: number): SheetProductRow {
+  try {
+    return valuesToSheetProductRow(row.map(String));
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`${RAW_DATA_TAB} row ${String(sheetRowNumber)}: ${error.message}`, {
+        cause: error,
+      });
+    }
+
+    throw new Error(`${RAW_DATA_TAB} row ${String(sheetRowNumber)}: Failed to parse row`, {
+      cause: error,
+    });
+  }
+}
+
+function padRows(rows: string[][], targetRowCount: number): string[][] {
+  const paddedRows = [...rows];
+
+  while (paddedRows.length < targetRowCount) {
+    paddedRows.push(blankRawDataRow());
+  }
+
+  return paddedRows;
+}
+
+function blankRawDataRow(): string[] {
+  return RAW_DATA_COLUMNS.map(() => "");
+}
+
+function columnNameForColumnCount(columnCount: number): string {
+  let remainingColumnCount = columnCount;
+  let columnName = "";
+
+  while (remainingColumnCount > 0) {
+    const alphabetIndex = (remainingColumnCount - 1) % 26;
+    columnName = String.fromCharCode(65 + alphabetIndex) + columnName;
+    remainingColumnCount = Math.floor((remainingColumnCount - 1) / 26);
+  }
+
+  return columnName;
 }
 
 function isActiveProductRow(row: SheetProductRow): boolean {
