@@ -16,4 +16,10 @@ describe("redactSecrets", () => {
 
     expect(result).toBe("safe message");
   });
+
+  it("redacts overlapping secret values longest first", () => {
+    const result = redactSecrets("token is abc123", ["abc", "abc123"]);
+
+    expect(result).toBe("token is [REDACTED]");
+  });
 });
