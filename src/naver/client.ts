@@ -18,37 +18,33 @@ interface FetchJsonResult {
 const ProductIdSchema = z.union([z.string(), z.number()]).transform((value) => String(value));
 
 const ProductSearchResponseSchema = z.object({
-  contents: z
-    .array(
-      z.object({
-        originProductNo: ProductIdSchema.optional(),
-        channelProducts: z
-          .array(
-            z.object({
-              channelProductNo: ProductIdSchema.optional(),
-              name: z.string().optional(),
-              channelProductName: z.string().optional(),
-              statusType: z.string().optional(),
-              channelProductDisplayStatusType: z.string().optional(),
-            }),
-          )
-          .optional(),
-      }),
-    )
-    .optional(),
+  contents: z.array(
+    z.object({
+      originProductNo: ProductIdSchema.optional(),
+      channelProducts: z.array(
+        z.object({
+          channelProductNo: ProductIdSchema.optional(),
+          name: z.string().optional(),
+          channelProductName: z.string().optional(),
+          statusType: z.string().optional(),
+          channelProductDisplayStatusType: z.string().optional(),
+        }),
+      ),
+    }),
+  ),
   last: z.boolean().optional(),
   totalPages: z.number().int().positive().optional(),
 });
 
+type ProductSearchResponse = z.infer<typeof ProductSearchResponseSchema>;
+
 const ProductDetailResponseSchema = z.object({
-  originProduct: z
-    .object({
-      originProductNo: ProductIdSchema.optional(),
-      name: z.string().optional(),
-      detailContent: z.string().optional(),
-      statusType: z.string().optional(),
-    })
-    .optional(),
+  originProduct: z.object({
+    originProductNo: ProductIdSchema.optional(),
+    name: z.string().optional(),
+    detailContent: z.string(),
+    statusType: z.string().optional(),
+  }),
   smartstoreChannelProduct: z
     .object({
       channelProductName: z.string().optional(),
@@ -94,8 +90,8 @@ export class LiveNaverCommerceClient implements NaverCommerceClient {
         }),
       );
 
-      for (const content of response.contents ?? []) {
-        for (const channelProduct of content.channelProducts ?? []) {
+      for (const content of response.contents) {
+        for (const channelProduct of content.channelProducts) {
           if (!channelProduct.channelProductNo) {
             continue;
           }
@@ -110,7 +106,7 @@ export class LiveNaverCommerceClient implements NaverCommerceClient {
         }
       }
 
-      last = response.last ?? page >= (response.totalPages ?? page);
+      last = isLastSearchPage(response, page);
       page += 1;
     }
 
@@ -130,13 +126,13 @@ export class LiveNaverCommerceClient implements NaverCommerceClient {
       const parsed = ProductDetailResponseSchema.parse(response);
 
       return {
-        originProductNo: parsed.originProduct?.originProductNo ?? "",
+        originProductNo: parsed.originProduct.originProductNo ?? "",
         channelProductNo: parsed.smartstoreChannelProduct?.channelProductNo ?? channelProductNo,
         productName:
-          parsed.smartstoreChannelProduct?.channelProductName ?? parsed.originProduct?.name ?? "",
-        productStatus: parsed.originProduct?.statusType ?? "",
+          parsed.smartstoreChannelProduct?.channelProductName ?? parsed.originProduct.name ?? "",
+        productStatus: parsed.originProduct.statusType ?? "",
         displayStatus: parsed.smartstoreChannelProduct?.channelProductDisplayStatusType ?? "",
-        detailContent: parsed.originProduct?.detailContent ?? "",
+        detailContent: parsed.originProduct.detailContent,
       };
     });
   }
@@ -253,4 +249,16 @@ async function readJsonOrEmpty(response: Response): Promise<unknown> {
   } catch {
     return {};
   }
+}
+
+function isLastSearchPage(response: ProductSearchResponse, page: number): boolean {
+  if (response.last !== undefined) {
+    return response.last;
+  }
+
+  if (response.totalPages !== undefined) {
+    return page >= response.totalPages;
+  }
+
+  throw new Error("Naver product search response missing pagination signal");
 }
