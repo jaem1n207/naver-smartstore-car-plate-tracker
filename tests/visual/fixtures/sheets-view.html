@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sheet View Fixture</title>
+    <link rel="stylesheet" href="./sheets-view.css" />
+  </head>
+  <body class="bg-slate-50 p-6 font-sans text-slate-900">
+    <main class="mx-auto w-[1120px]">
+      <h1 class="mb-4 text-2xl font-bold">차량번호 동기화 결과</h1>
+      <section class="mb-5 grid grid-cols-4 gap-3" aria-label="sync summary">
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <span class="block text-xs text-slate-500">전체 등록 매물</span>
+          <strong class="mt-1.5 block text-2xl">5</strong>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <span class="block text-xs text-slate-500">추출 성공</span>
+          <strong class="mt-1.5 block text-2xl">4</strong>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <span class="block text-xs text-slate-500">중복 확인</span>
+          <strong class="mt-1.5 block text-2xl">3</strong>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <span class="block text-xs text-slate-500">추출 실패</span>
+          <strong class="mt-1.5 block text-2xl">1</strong>
+        </div>
+      </section>
+      <table
+        class="w-full overflow-hidden rounded-lg border border-slate-200 bg-white text-left text-sm"
+      >
+        <thead>
+          <tr class="bg-slate-100 text-slate-700">
+            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">스토어</th>
+            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">상품번호</th>
+            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">상품명</th>
+            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">차량번호</th>
+            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">상태</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="border-b border-slate-100 px-3 py-2.5">A</td>
+            <td class="border-b border-slate-100 px-3 py-2.5">2001</td>
+            <td class="border-b border-slate-100 px-3 py-2.5">Store A bucket truck</td>
+            <td class="border-b border-slate-100 px-3 py-2.5">123가4567</td>
+            <td class="border-b border-slate-100 px-3 py-2.5">
+              <span
+                class="inline-block min-w-28 rounded-full bg-amber-100 px-2 py-1 text-center text-xs font-bold text-amber-800"
+                >cross-store</span
+              >
+            </td>
+          </tr>
+          <tr>
+            <td class="border-b border-slate-100 px-3 py-2.5">A</td>
+            <td class="border-b border-slate-100 px-3 py-2.5">2003</td>
+            <td class="border-b border-slate-100 px-3 py-2.5">Store A image only truck</td>
+            <td class="border-b border-slate-100 px-3 py-2.5"></td>
+            <td class="border-b border-slate-100 px-3 py-2.5">
+              <span
+                class="inline-block min-w-28 rounded-full bg-red-100 px-2 py-1 text-center text-xs font-bold text-red-800"
+                >not found</span
+              >
+            </td>
+          </tr>
+          <tr>
+            <td class="px-3 py-2.5">B</td>
+            <td class="px-3 py-2.5">4002</td>
+            <td class="px-3 py-2.5">Store B unique truck</td>
+            <td class="px-3 py-2.5">234나5678</td>
+            <td class="px-3 py-2.5">
+              <span
+                class="inline-block min-w-28 rounded-full bg-emerald-100 px-2 py-1 text-center text-xs font-bold text-emerald-800"
+                >unique</span
+              >
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+  </body>
+</html>
