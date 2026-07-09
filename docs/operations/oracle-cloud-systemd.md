@@ -11,7 +11,15 @@ pnpm build
 
 ## Environment
 
-Create a server-only `.env` file outside git. Include the variables from `.env.example`.
+Create a server-only `.env` file outside git. Include the variables from `.env.example`. Store the Google service account JSON outside the repository and set `GOOGLE_APPLICATION_CREDENTIALS` to its absolute path.
+
+```bash
+sudo install -d -m 700 -o carplate -g carplate /opt/naver-smartstore-car-plate-tracker/secrets
+sudo chmod 600 /opt/naver-smartstore-car-plate-tracker/secrets/google-service-account.json
+sudo chown carplate:carplate /opt/naver-smartstore-car-plate-tracker/secrets/google-service-account.json
+```
+
+Do not set `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` when the file-path variable is configured.
 
 ## Service
 
