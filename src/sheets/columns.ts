@@ -33,7 +33,7 @@ export function parseStoreKey(value: string): SheetProductRow["storeKey"] {
     return value;
   }
 
-  return "A";
+  throw new Error(`Invalid storeKey value: ${value}`);
 }
 
 export function parsePlateExtractionStatus(value: string): PlateExtractionStatus {
@@ -46,7 +46,7 @@ export function parsePlateExtractionStatus(value: string): PlateExtractionStatus
     return value;
   }
 
-  return "not_found";
+  throw new Error(`Invalid extractionStatus value: ${value}`);
 }
 
 export function parseDuplicateStatus(value: string): DuplicateStatus {
@@ -59,7 +59,7 @@ export function parseDuplicateStatus(value: string): DuplicateStatus {
     return value;
   }
 
-  return "unique";
+  throw new Error(`Invalid duplicateStatus value: ${value}`);
 }
 
 export function sheetProductRowToValues(row: SheetProductRow): string[] {
