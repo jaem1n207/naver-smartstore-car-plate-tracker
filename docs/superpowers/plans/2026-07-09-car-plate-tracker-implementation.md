@@ -1,5 +1,7 @@
 # Car Plate Tracker Implementation Plan
 
+> Historical implementation plan. The completed worker now creates Korean-named Google Sheets tabs automatically; current behavior is documented in `README.md` and `docs/architecture/system-overview.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a Node.js and TypeScript worker that syncs non-deleted Naver Smartstore products from two stores, extracts Korean vehicle plate numbers from product detail content, detects duplicates, and writes operator-friendly Google Sheets views.
