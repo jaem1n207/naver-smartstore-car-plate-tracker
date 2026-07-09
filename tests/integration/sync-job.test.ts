@@ -42,6 +42,8 @@ describe("runSyncJob", () => {
     expect(result.successCount).toBe(4);
     expect(result.failureCount).toBe(1);
     expect(sheets.rawRows).toHaveLength(5);
+    expect(sheets.rawRows.find((row) => row.storeKey === "A")?.storeName).toBe("Store A (store-a)");
+    expect(sheets.rawRows.find((row) => row.storeKey === "B")?.storeName).toBe("Store B (store-b)");
     expect(sheets.viewRows[EXTRACTION_FAILURES_TAB]).toHaveLength(1);
     expect(sheets.viewRows[ACROSS_STORES_DUPLICATES_TAB]).toHaveLength(3);
     expect(sheets.runLogs).toHaveLength(1);

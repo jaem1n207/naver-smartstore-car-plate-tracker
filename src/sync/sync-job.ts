@@ -135,7 +135,7 @@ function createSheetProductRow(
 
   return {
     storeKey: store.storeKey,
-    storeName: store.storeName,
+    storeName: store.storeDisplayName,
     storeBaseUrl: store.storeBaseUrl,
     channelProductNo: product.channelProductNo,
     originProductNo: product.originProductNo,
