@@ -3,6 +3,7 @@ import cron from "node-cron";
 import pino from "pino";
 import { loadEnv } from "../config/env.js";
 import { loadStores } from "../config/stores.js";
+import { safeErrorLog } from "../logging/safe-error.js";
 import { LiveNaverCommerceClient } from "../naver/client.js";
 import { MockNaverCommerceClient } from "../naver/mock-client.js";
 import { GoogleSheetRepository } from "../sheets/google-repository.js";
@@ -42,10 +43,22 @@ cron.schedule(env.syncCron, async () => {
 
     logger.info(result, "scheduled sync completed");
   } catch (error) {
-    logger.error({ error }, "scheduled sync failed");
+    logger.error({ error: safeErrorLog(error, runtimeSecrets()) }, "scheduled sync failed");
   } finally {
     running = false;
   }
 });
 
 logger.info({ cron: env.syncCron, mode: env.naverApiMode }, "scheduler started");
+
+function runtimeSecrets(): string[] {
+  return [
+    env.storeAClientSecret,
+    env.storeBClientSecret,
+    env.storeAClientId,
+    env.storeBClientId,
+    env.storeAAccountId,
+    env.storeBAccountId,
+    env.googleServiceAccountJsonBase64 ?? "",
+  ];
+}
