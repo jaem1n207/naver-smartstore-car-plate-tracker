@@ -2,16 +2,16 @@ import "dotenv/config";
 import pino from "pino";
 import { loadEnv } from "../config/env.js";
 import { loadStores } from "../config/stores.js";
-import { safeErrorLog } from "../logging/safe-error.js";
+import { runtimeSecretValues, safeErrorLog } from "../logging/safe-error.js";
 import { LiveNaverCommerceClient } from "../naver/client.js";
 import { MockNaverCommerceClient } from "../naver/mock-client.js";
 import { GoogleSheetRepository } from "../sheets/google-repository.js";
 import { InMemorySheetRepository } from "../sheets/in-memory-repository.js";
 import { runSyncJob } from "../sync/sync-job.js";
 
-const env = loadEnv();
-const logger = pino({ level: env.logLevel === "silent" ? "silent" : env.logLevel });
 async function main(): Promise<void> {
+  const env = loadEnv();
+  const logger = pino({ level: env.logLevel === "silent" ? "silent" : env.logLevel });
   const stores = loadStores(env);
   const naverClient =
     env.naverApiMode === "live"
@@ -34,18 +34,7 @@ async function main(): Promise<void> {
 }
 
 await main().catch((error: unknown) => {
-  logger.error({ error: safeErrorLog(error, runtimeSecrets()) }, "sync failed");
+  const logger = pino({ level: "error" });
+  logger.error({ error: safeErrorLog(error, runtimeSecretValues(process.env)) }, "sync failed");
   process.exitCode = 1;
 });
-
-function runtimeSecrets(): string[] {
-  return [
-    env.storeAClientSecret,
-    env.storeBClientSecret,
-    env.storeAClientId,
-    env.storeBClientId,
-    env.storeAAccountId,
-    env.storeBAccountId,
-    env.googleServiceAccountJsonBase64 ?? "",
-  ];
-}

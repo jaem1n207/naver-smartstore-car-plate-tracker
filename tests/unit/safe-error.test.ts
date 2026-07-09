@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeErrorLog } from "../../src/logging/safe-error.js";
+import { runtimeSecretValues, safeErrorLog } from "../../src/logging/safe-error.js";
 
 describe("safeErrorLog", () => {
   it("keeps only safe error fields and redacts configured secrets", () => {
@@ -27,5 +27,27 @@ describe("safeErrorLog", () => {
       code: undefined,
       status: undefined,
     });
+  });
+
+  it("collects runtime secret values from raw environment without validation", () => {
+    expect(
+      runtimeSecretValues({
+        STORE_A_CLIENT_ID: "client-a",
+        STORE_A_CLIENT_SECRET: "secret-a",
+        STORE_A_ACCOUNT_ID: "account-a",
+        STORE_B_CLIENT_ID: "client-b",
+        STORE_B_CLIENT_SECRET: "secret-b",
+        STORE_B_ACCOUNT_ID: "account-b",
+        GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: "google-json",
+      }),
+    ).toEqual([
+      "client-a",
+      "secret-a",
+      "account-a",
+      "client-b",
+      "secret-b",
+      "account-b",
+      "google-json",
+    ]);
   });
 });

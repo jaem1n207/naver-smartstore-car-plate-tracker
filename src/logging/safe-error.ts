@@ -7,6 +7,16 @@ export interface SafeErrorLog {
   readonly status: number | undefined;
 }
 
+const SECRET_ENV_KEYS = [
+  "STORE_A_CLIENT_ID",
+  "STORE_A_CLIENT_SECRET",
+  "STORE_A_ACCOUNT_ID",
+  "STORE_B_CLIENT_ID",
+  "STORE_B_CLIENT_SECRET",
+  "STORE_B_ACCOUNT_ID",
+  "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
+];
+
 export function safeErrorLog(error: unknown, secrets: readonly string[]): SafeErrorLog {
   if (error instanceof Error) {
     return {
@@ -23,6 +33,10 @@ export function safeErrorLog(error: unknown, secrets: readonly string[]): SafeEr
     code: undefined,
     status: undefined,
   };
+}
+
+export function runtimeSecretValues(source: Record<string, string | undefined>): string[] {
+  return SECRET_ENV_KEYS.map((key) => source[key] ?? "");
 }
 
 function errorCode(source: object): string | undefined {
