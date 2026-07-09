@@ -13,8 +13,11 @@ describe("analyzeDuplicates", () => {
       { ...base, storeKey: "A", channelProductNo: "1", normalizedPlate: "123가4567" },
       { ...base, storeKey: "B", channelProductNo: "2", normalizedPlate: "234나5678" },
     ];
+    const result = analyzeDuplicates(rows);
 
-    expect(analyzeDuplicates(rows).map((row) => row.duplicateStatus)).toEqual(["unique", "unique"]);
+    expect(result.map((row) => row.duplicateStatus)).toEqual(["unique", "unique"]);
+    expect(result.map((row) => row.channelProductNo)).toEqual(["1", "2"]);
+    expect(result[0]).toEqual({ ...rows[0], duplicateStatus: "unique" });
   });
 
   it("marks same-store duplicates", () => {
@@ -55,6 +58,22 @@ describe("analyzeDuplicates", () => {
     ]);
   });
 
+  it("marks repeated rows in both stores as duplicated both ways", () => {
+    const rows: ProductRecord[] = [
+      { ...base, storeKey: "A", channelProductNo: "1", normalizedPlate: "123가4567" },
+      { ...base, storeKey: "A", channelProductNo: "2", normalizedPlate: "123가4567" },
+      { ...base, storeKey: "B", channelProductNo: "3", normalizedPlate: "123가4567" },
+      { ...base, storeKey: "B", channelProductNo: "4", normalizedPlate: "123가4567" },
+    ];
+
+    expect(analyzeDuplicates(rows).map((row) => row.duplicateStatus)).toEqual([
+      "duplicated_both",
+      "duplicated_both",
+      "duplicated_both",
+      "duplicated_both",
+    ]);
+  });
+
   it("ignores extraction failures", () => {
     const rows: ProductRecord[] = [
       { ...base, storeKey: "A", channelProductNo: "1", normalizedPlate: "123가4567" },
@@ -64,6 +83,15 @@ describe("analyzeDuplicates", () => {
         channelProductNo: "2",
         extractionStatus: "not_found",
       },
+    ];
+
+    expect(analyzeDuplicates(rows).map((row) => row.duplicateStatus)).toEqual(["unique", "unique"]);
+  });
+
+  it("ignores successful rows without normalized plates", () => {
+    const rows: ProductRecord[] = [
+      { ...base, storeKey: "A", channelProductNo: "1", normalizedPlate: "" },
+      { ...base, storeKey: "B", channelProductNo: "2", normalizedPlate: "123가4567" },
     ];
 
     expect(analyzeDuplicates(rows).map((row) => row.duplicateStatus)).toEqual(["unique", "unique"]);
