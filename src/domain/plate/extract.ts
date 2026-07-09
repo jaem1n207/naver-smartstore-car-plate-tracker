@@ -1,5 +1,5 @@
 import { load } from "cheerio";
-import { decode } from "he";
+import he from "he";
 import { isSupportedPlate, normalizePlateCandidate } from "./normalize.js";
 import type { PlateExtractionResult } from "./types.js";
 
@@ -11,26 +11,25 @@ const PLATE_CANDIDATE_PATTERN =
   /(?<![0-9])(?:[0-9]{2,3}[\s\-_.:|/\\]*[가-힣][\s\-_.:|/\\]*[0-9]{4})(?![0-9])/gu;
 const LABEL_PATTERN = /차량번호|차번|등록번호|자동차번호/gu;
 const LABEL_VALUE_SEPARATOR_PATTERN = /^[\s:：|/\\_.-]*/u;
-const LABEL_NEAR_VALUE_PATTERN =
-  /^[0-9]{1,4}(?:[\s\-_.:|/\\]*[가-힣])?(?:[\s\-_.:|/\\]*[0-9]{1,5})?/u;
+const LABEL_NEAR_VALUE_PATTERN = /^[0-9]{1,4}[\s\-_.:|/\\]*[가-힣][\s\-_.:|/\\]*[0-9]{1,5}/u;
 
 export function extractPlateFromHtml(html: string): PlateExtractionResult {
   const text = htmlToText(html);
-  const labelNearPlate = findLabelNearPlate(text);
-
-  if (labelNearPlate !== undefined && !isSupportedPlate(labelNearPlate)) {
-    return {
-      status: "invalid_format",
-      rawPlate: labelNearPlate,
-      candidates: [],
-      message: INVALID_LABEL_NEAR_MESSAGE,
-    };
-  }
-
   const rawCandidates = findRawCandidates(text);
   const candidates = uniqueSupportedCandidates(rawCandidates);
 
   if (candidates.length === 0) {
+    const labelNearPlate = findLabelNearPlate(text);
+
+    if (labelNearPlate !== undefined && !isSupportedPlate(labelNearPlate)) {
+      return {
+        status: "invalid_format",
+        rawPlate: labelNearPlate,
+        candidates,
+        message: INVALID_LABEL_NEAR_MESSAGE,
+      };
+    }
+
     return {
       status: "not_found",
       candidates,
@@ -79,7 +78,7 @@ function htmlToText(html: string): string {
 
   $("script, style, noscript").remove();
 
-  return decode($.root().text()).normalize("NFKC").replace(/\s+/gu, " ").trim();
+  return he.decode($.root().text()).normalize("NFKC").replace(/\s+/gu, " ").trim();
 }
 
 function findLabelNearPlate(text: string): string | undefined {

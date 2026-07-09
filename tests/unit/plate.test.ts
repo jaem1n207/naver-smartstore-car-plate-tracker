@@ -87,6 +87,17 @@ describe("extractPlateFromHtml", () => {
     });
   });
 
+  it("uses a later valid plate instead of ordinary label-adjacent text", () => {
+    const result = extractPlateFromHtml("<p>차량번호 2024년식 차량입니다. 실제 번호 123가4567</p>");
+
+    expect(result).toEqual({
+      status: "success",
+      rawPlate: "123가4567",
+      normalizedPlate: "123가4567",
+      candidates: ["123가4567"],
+    });
+  });
+
   it("returns invalid_format when a label-near value starts with too few digits", () => {
     const result = extractPlateFromHtml("<p>차량번호 1가2345</p>");
 
