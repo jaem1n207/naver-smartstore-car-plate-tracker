@@ -2953,7 +2953,7 @@ Expected: command exits with status 0.
 Run:
 
 ```bash
-rg -n "docs.google.com/spreadsheets|NID_|NID_AUT|NID_SES|truck-king|truckhub|\\$2a\\$04\\$Dc|\\$2a\\$04\\$wn|[0-9]{2,3}[가-힣][0-9]{4}" .
+rg -n "docs.google.com/spreadsheets|NID_|NID_AUT|NID_SES|REAL_STORE_SLUG|\\$2a\\$04\\$|[0-9]{2,3}[가-힣][0-9]{4}" .
 ```
 
 Expected: no real spreadsheet URL, browser cookie, real store path, exposed real bcrypt secret prefix, or real vehicle plate is present. Test fixtures may contain fake plate values such as `123가4567` and `234나5678`.
