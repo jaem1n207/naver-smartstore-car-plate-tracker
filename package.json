@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@11.10.0",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node --max-old-space-size=768 ./node_modules/typescript/bin/tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "format:check": "prettier . --check",
