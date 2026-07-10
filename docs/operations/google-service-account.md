@@ -58,13 +58,13 @@ The downloaded file resembles this structure. These are placeholders, not usable
 Copy the JSON to a server-only directory outside the repository and restrict it to the process user:
 
 ```bash
-chmod 600 /opt/naver-smartstore-car-plate-tracker/secrets/google-service-account.json
+chmod 600 /etc/naver-smartstore-car-plate-tracker/google-service-account.json
 ```
 
 Set the absolute path:
 
 ```dotenv
-GOOGLE_APPLICATION_CREDENTIALS=/opt/naver-smartstore-car-plate-tracker/secrets/google-service-account.json
+GOOGLE_APPLICATION_CREDENTIALS=/etc/naver-smartstore-car-plate-tracker/google-service-account.json
 GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=
 ```
 
@@ -96,20 +96,20 @@ STORE_A_NAME=<첫 번째 스토어 이름>
 STORE_A_BASE_URL=https://smartstore.naver.com/<첫 번째 스토어 URL slug>
 STORE_A_CLIENT_ID=<첫 번째 스토어 커머스API 애플리케이션 ID>
 STORE_A_CLIENT_SECRET=<첫 번째 스토어 커머스API 애플리케이션 Secret>
-STORE_A_ACCOUNT_ID=<첫 번째 스토어 API account ID>
 
 STORE_B_NAME=<두 번째 스토어 이름>
 STORE_B_BASE_URL=https://smartstore.naver.com/<두 번째 스토어 URL slug>
 STORE_B_CLIENT_ID=<두 번째 스토어 커머스API 애플리케이션 ID>
 STORE_B_CLIENT_SECRET=<두 번째 스토어 커머스API 애플리케이션 Secret>
-STORE_B_ACCOUNT_ID=<두 번째 스토어 API account ID>
 
 GOOGLE_SHEETS_SPREADSHEET_ID=<스프레드시트 URL의 d/와 /edit 사이 값>
-GOOGLE_APPLICATION_CREDENTIALS=/opt/naver-smartstore-car-plate-tracker/secrets/google-service-account.json
+GOOGLE_APPLICATION_CREDENTIALS=/etc/naver-smartstore-car-plate-tracker/google-service-account.json
 GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=
 ```
 
 For local mock development, copy `.env.example`. Mock mode does not call Naver or Google APIs.
+
+Both Naver applications are `내스토어 애플리케이션`. The worker therefore requests OAuth tokens with `type=SELF`; a seller UID or `STORE_*_ACCOUNT_ID` variable is not required.
 
 The worker combines each configured name and URL slug into the Sheets display label. For example, `동부트럭` plus `example-store-east` appears as `동부트럭 (example-store-east)`.
 
