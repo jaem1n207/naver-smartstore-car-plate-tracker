@@ -112,7 +112,7 @@ describe("sheet row column helpers", () => {
       tabs.names.runLog,
     ]);
     expect(tabs.definitions.slice(0, 5).map((definition) => definition.columnCount)).toEqual([
-      5, 5, 5, 5, 5,
+      12, 12, 12, 12, 12,
     ]);
   });
 
@@ -120,6 +120,8 @@ describe("sheet row column helpers", () => {
     const duplicateRow: SheetProductRow = {
       ...baseRow,
       duplicateStatus: "duplicated_both",
+      lastErrorAt: "2026-07-10T09:30:00.000Z",
+      errorMessage: "Synthetic sync error",
     };
 
     expect(OPERATOR_VIEW_HEADERS).toEqual([
@@ -128,6 +130,13 @@ describe("sheet row column helpers", () => {
       "상품 URL",
       "스토어 표시명",
       "전시 상태",
+      "상품 상태",
+      "상품명",
+      "최초 감지일시",
+      "마지막 동기화일시",
+      "관리자 메모",
+      "마지막 오류일시",
+      "오류 메시지",
     ]);
     expect(sheetProductRowToOperatorValues(duplicateRow)).toEqual([
       "123가4567",
@@ -135,6 +144,13 @@ describe("sheet row column helpers", () => {
       "https://example.com/store-a/products/2001",
       "Store A",
       "ON",
+      "SALE",
+      "Synthetic product",
+      "2026-07-09T00:00:00.000Z",
+      "2026-07-09T00:00:00.000Z",
+      "note",
+      "2026-07-10T09:30:00.000Z",
+      "Synthetic sync error",
     ]);
   });
 

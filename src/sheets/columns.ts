@@ -5,7 +5,18 @@ import type { SheetProductRow } from "./types.js";
 export type RawDataColumn = keyof SheetProductRow;
 export type OperatorViewColumn = Extract<
   RawDataColumn,
-  "normalizedPlate" | "duplicateStatus" | "productUrl" | "storeName" | "displayStatus"
+  | "normalizedPlate"
+  | "duplicateStatus"
+  | "productUrl"
+  | "storeName"
+  | "displayStatus"
+  | "productStatus"
+  | "productName"
+  | "firstSeenAt"
+  | "lastSyncedAt"
+  | "manualNote"
+  | "lastErrorAt"
+  | "errorMessage"
 >;
 
 export interface SheetTabDefinition {
@@ -73,6 +84,13 @@ export const OPERATOR_VIEW_COLUMNS: OperatorViewColumn[] = [
   "productUrl",
   "storeName",
   "displayStatus",
+  "productStatus",
+  "productName",
+  "firstSeenAt",
+  "lastSyncedAt",
+  "manualNote",
+  "lastErrorAt",
+  "errorMessage",
 ];
 
 const RAW_DATA_HEADER_BY_COLUMN: Record<RawDataColumn, string> = {
@@ -105,6 +123,13 @@ const OPERATOR_VIEW_HEADER_BY_COLUMN: Record<OperatorViewColumn, string> = {
   productUrl: RAW_DATA_HEADER_BY_COLUMN.productUrl,
   storeName: RAW_DATA_HEADER_BY_COLUMN.storeName,
   displayStatus: RAW_DATA_HEADER_BY_COLUMN.displayStatus,
+  productStatus: RAW_DATA_HEADER_BY_COLUMN.productStatus,
+  productName: RAW_DATA_HEADER_BY_COLUMN.productName,
+  firstSeenAt: RAW_DATA_HEADER_BY_COLUMN.firstSeenAt,
+  lastSyncedAt: RAW_DATA_HEADER_BY_COLUMN.lastSyncedAt,
+  manualNote: RAW_DATA_HEADER_BY_COLUMN.manualNote,
+  lastErrorAt: RAW_DATA_HEADER_BY_COLUMN.lastErrorAt,
+  errorMessage: RAW_DATA_HEADER_BY_COLUMN.errorMessage,
 };
 
 const EXTRACTION_STATUS_LABELS: Record<PlateExtractionStatus, string> = {
