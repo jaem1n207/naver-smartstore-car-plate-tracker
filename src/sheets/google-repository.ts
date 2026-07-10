@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { DuplicateStatus } from "../domain/duplicates/types.js";
 import {
   createManagedSheetTabs,
+  OPERATOR_VIEW_COLUMNS,
   OPERATOR_VIEW_HEADERS,
   RAW_DATA_COLUMNS,
   RAW_DATA_HEADERS,
@@ -18,6 +19,16 @@ import {
   valuesToSheetProductRow,
 } from "./columns.js";
 import type { SheetTabDefinition, SheetTabNames } from "./columns.js";
+import {
+  displayStatusStyle,
+  DUPLICATE_GROUP_STYLES,
+  duplicateStatusStyle,
+  findDuplicateGroups,
+  productStatusStyle,
+  SHEET_HEADER_STYLE,
+  sortOperatorRows,
+} from "./operator-view.js";
+import type { DuplicateGroup, DuplicateGroupStyle, OperatorCellStyle } from "./operator-view.js";
 import type { RunLogRow, SheetProductRow, SheetRepository } from "./types.js";
 
 const SPREADSHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
@@ -26,8 +37,12 @@ const RUN_LOG_END_COLUMN = columnNameForColumnCount(RUN_LOG_HEADERS.length);
 const MAX_MANAGED_PRODUCT_COLUMNS = RAW_DATA_COLUMNS.length;
 const MIN_TABLE_ROW_COUNT = 2;
 const OPERATOR_COLUMN_WIDTHS: readonly number[] = [
-  120, 160, 320, 220, 100, 110, 240, 170, 170, 220, 170, 320,
+  120, 160, 320, 220, 125, 135, 240, 170, 170, 220, 170, 320,
 ];
+const OPERATOR_FORMAT_FIELDS =
+  "userEnteredFormat(backgroundColorStyle,textFormat.bold,textFormat.foregroundColorStyle)";
+const HEADER_FORMAT_FIELDS =
+  "userEnteredFormat(backgroundColorStyle,textFormat.bold,textFormat.foregroundColorStyle,horizontalAlignment,verticalAlignment)";
 
 type ManagedTableSpec = {
   readonly name: string;
@@ -105,29 +120,19 @@ export class GoogleSheetRepository implements SheetRepository {
 
     const activeRows = rows.filter(isActiveProductRow);
 
-    await this.replaceSheet(
-      this.tabNames.storeAView,
-      operatorViewValues(activeRows.filter(isStoreARow)),
-    );
-    await this.replaceSheet(
-      this.tabNames.storeBView,
-      operatorViewValues(activeRows.filter(isStoreBRow)),
-    );
-    await this.replaceSheet(
+    await this.replaceOperatorSheet(this.tabNames.storeAView, activeRows.filter(isStoreARow));
+    await this.replaceOperatorSheet(this.tabNames.storeBView, activeRows.filter(isStoreBRow));
+    await this.replaceOperatorSheet(
       this.tabNames.storeADuplicates,
-      operatorViewValues(
-        activeRows.filter((row) => isStoreARow(row) && isSameStoreOnlyDuplicate(row)),
-      ),
+      activeRows.filter((row) => isStoreARow(row) && isSameStoreOnlyDuplicate(row)),
     );
-    await this.replaceSheet(
+    await this.replaceOperatorSheet(
       this.tabNames.storeBDuplicates,
-      operatorViewValues(
-        activeRows.filter((row) => isStoreBRow(row) && isSameStoreOnlyDuplicate(row)),
-      ),
+      activeRows.filter((row) => isStoreBRow(row) && isSameStoreOnlyDuplicate(row)),
     );
-    await this.replaceSheet(
+    await this.replaceOperatorSheet(
       this.tabNames.acrossStoresDuplicates,
-      operatorViewValues(activeRows.filter(hasAcrossStoresDuplicate)),
+      activeRows.filter(hasAcrossStoresDuplicate),
     );
     await this.replaceSheet(
       this.tabNames.extractionFailures,
@@ -270,7 +275,24 @@ export class GoogleSheetRepository implements SheetRepository {
     }
   }
 
-  private async replaceSheet(tabName: string, values: string[][]): Promise<void> {
+  private async replaceOperatorSheet(tabName: string, rows: SheetProductRow[]): Promise<void> {
+    const sortedRows = sortOperatorRows(rows);
+    const targetRowCount = await this.replaceSheet(tabName, operatorViewValues(sortedRows));
+    const sheetId = this.sheetIdsByTitle.get(tabName);
+
+    if (sheetId === undefined) {
+      throw new Error(`관리 대상 시트 ID를 찾을 수 없습니다: ${tabName}`);
+    }
+
+    await this.sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
+      requestBody: {
+        requests: createOperatorFormattingRequests(sheetId, sortedRows, targetRowCount),
+      },
+    });
+  }
+
+  private async replaceSheet(tabName: string, values: string[][]): Promise<number> {
     const definition = this.definitionForTitle(tabName);
     const gridColumnCount = this.gridColumnCountsByTitle.get(tabName) ?? definition.columnCount;
     const clearColumnCount = Math.max(
@@ -295,6 +317,8 @@ export class GoogleSheetRepository implements SheetRepository {
       },
     });
     await this.syncManagedTable(definition, tableRowCount);
+
+    return targetRowCount;
   }
 
   private definitionForTitle(title: string): SheetTabDefinition {
@@ -500,9 +524,49 @@ function createManagedLayoutRequests(
         properties: {
           sheetId,
           index,
-          gridProperties: { frozenRowCount: 1 },
+          gridProperties: {
+            frozenRowCount: 1,
+            ...(definition.operatorFacing ? { frozenColumnCount: 2 } : {}),
+          },
         },
-        fields: "index,gridProperties.frozenRowCount",
+        fields: definition.operatorFacing
+          ? "index,gridProperties.frozenRowCount,gridProperties.frozenColumnCount"
+          : "index,gridProperties.frozenRowCount",
+      },
+    });
+    requests.push({
+      updateDimensionProperties: {
+        range: {
+          sheetId,
+          dimension: "ROWS",
+          startIndex: 0,
+          endIndex: 1,
+        },
+        properties: { pixelSize: 36 },
+        fields: "pixelSize",
+      },
+    });
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: 0,
+          endRowIndex: 1,
+          startColumnIndex: 0,
+          endColumnIndex: definition.columnCount,
+        },
+        cell: {
+          userEnteredFormat: {
+            backgroundColorStyle: colorStyleFromHex(SHEET_HEADER_STYLE.backgroundHex),
+            textFormat: {
+              bold: true,
+              foregroundColorStyle: colorStyleFromHex(SHEET_HEADER_STYLE.foregroundHex),
+            },
+            horizontalAlignment: "LEFT",
+            verticalAlignment: "MIDDLE",
+          },
+        },
+        fields: HEADER_FORMAT_FIELDS,
       },
     });
 
@@ -574,7 +638,7 @@ function managedTable(
       columnName: header,
     })),
     rowsProperties: {
-      headerColorStyle: rgbColorStyle(0.87, 0.93, 0.9),
+      headerColorStyle: colorStyleFromHex(SHEET_HEADER_STYLE.backgroundHex),
       firstBandColorStyle: rgbColorStyle(1, 1, 1),
       secondBandColorStyle: rgbColorStyle(0.96, 0.97, 0.97),
     },
@@ -583,6 +647,166 @@ function managedTable(
 
 function rgbColorStyle(red: number, green: number, blue: number): sheets_v4.Schema$ColorStyle {
   return { rgbColor: { red, green, blue } };
+}
+
+function colorStyleFromHex(hex: string): sheets_v4.Schema$ColorStyle {
+  if (!/^#[\dA-F]{6}$/iu.test(hex)) {
+    throw new Error(`Invalid sheet color: ${hex}`);
+  }
+
+  return rgbColorStyle(
+    Number.parseInt(hex.slice(1, 3), 16) / 255,
+    Number.parseInt(hex.slice(3, 5), 16) / 255,
+    Number.parseInt(hex.slice(5, 7), 16) / 255,
+  );
+}
+
+function createOperatorFormattingRequests(
+  sheetId: number,
+  rows: readonly SheetProductRow[],
+  targetRowCount: number,
+): sheets_v4.Schema$Request[] {
+  const requests: sheets_v4.Schema$Request[] = [];
+  const duplicateGroups = findDuplicateGroups(rows);
+  const groupStyleByRowIndex = duplicateGroupStylesByRowIndex(duplicateGroups);
+
+  if (rows.length > 0) {
+    requests.push({
+      updateCells: {
+        start: { sheetId, rowIndex: 1, columnIndex: 0 },
+        rows: rows.map((row, rowIndex) => ({
+          values: OPERATOR_VIEW_COLUMNS.map((column) => ({
+            userEnteredFormat: operatorCellFormat(row, column, groupStyleByRowIndex.get(rowIndex)),
+          })),
+        })),
+        fields: OPERATOR_FORMAT_FIELDS,
+      },
+    });
+  }
+
+  const firstStaleRowIndex = rows.length + 1;
+
+  if (firstStaleRowIndex < targetRowCount) {
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: firstStaleRowIndex,
+          endRowIndex: targetRowCount,
+          startColumnIndex: 0,
+          endColumnIndex: OPERATOR_VIEW_COLUMNS.length,
+        },
+        cell: { userEnteredFormat: { textFormat: { bold: false } } },
+        fields: OPERATOR_FORMAT_FIELDS,
+      },
+    });
+  }
+
+  requests.push({
+    updateBorders: {
+      range: {
+        sheetId,
+        startRowIndex: 1,
+        endRowIndex: targetRowCount,
+        startColumnIndex: 0,
+        endColumnIndex: OPERATOR_VIEW_COLUMNS.length,
+      },
+      top: { style: "NONE" },
+      bottom: { style: "NONE" },
+      innerHorizontal: { style: "NONE" },
+    },
+  });
+
+  for (const group of duplicateGroups) {
+    const groupStyle = DUPLICATE_GROUP_STYLES[group.styleIndex];
+
+    if (groupStyle === undefined) {
+      continue;
+    }
+
+    const border = {
+      style: "SOLID_MEDIUM",
+      colorStyle: colorStyleFromHex(groupStyle.borderHex),
+    };
+    requests.push({
+      updateBorders: {
+        range: {
+          sheetId,
+          startRowIndex: group.startIndex + 1,
+          endRowIndex: group.endIndex + 1,
+          startColumnIndex: 0,
+          endColumnIndex: OPERATOR_VIEW_COLUMNS.length,
+        },
+        top: border,
+        bottom: border,
+      },
+    });
+  }
+
+  return requests;
+}
+
+function duplicateGroupStylesByRowIndex(
+  groups: readonly DuplicateGroup[],
+): Map<number, DuplicateGroupStyle> {
+  const stylesByRowIndex = new Map<number, DuplicateGroupStyle>();
+
+  for (const group of groups) {
+    const style = DUPLICATE_GROUP_STYLES[group.styleIndex];
+
+    if (style === undefined) {
+      continue;
+    }
+
+    for (let index = group.startIndex; index < group.endIndex; index += 1) {
+      stylesByRowIndex.set(index, style);
+    }
+  }
+
+  return stylesByRowIndex;
+}
+
+function operatorCellFormat(
+  row: SheetProductRow,
+  column: (typeof OPERATOR_VIEW_COLUMNS)[number],
+  groupStyle: DuplicateGroupStyle | undefined,
+): sheets_v4.Schema$CellFormat {
+  const statusStyle = statusStyleForColumn(row, column);
+  const backgroundHex = statusStyle?.backgroundHex ?? groupStyle?.backgroundHex;
+  const foregroundHex =
+    statusStyle?.foregroundHex ?? (column === "productUrl" ? undefined : groupStyle?.foregroundHex);
+
+  return {
+    ...(backgroundHex === undefined
+      ? {}
+      : { backgroundColorStyle: colorStyleFromHex(backgroundHex) }),
+    textFormat: {
+      bold: statusStyle !== undefined || (column === "normalizedPlate" && groupStyle !== undefined),
+      ...(foregroundHex === undefined
+        ? {}
+        : { foregroundColorStyle: colorStyleFromHex(foregroundHex) }),
+    },
+  };
+}
+
+function statusStyleForColumn(
+  row: SheetProductRow,
+  column: (typeof OPERATOR_VIEW_COLUMNS)[number],
+): OperatorCellStyle | undefined {
+  switch (column) {
+    case "duplicateStatus":
+      return duplicateStatusStyle(row.duplicateStatus);
+    case "displayStatus":
+      return row.displayStatus.trim().length === 0
+        ? undefined
+        : displayStatusStyle(row.displayStatus);
+    case "productStatus":
+      return row.productStatus.trim().length === 0
+        ? undefined
+        : productStatusStyle(row.productStatus);
+    default:
+      return undefined;
+  }
 }
 
 function decodeServiceAccountCredentials(encodedJson: string | undefined) {

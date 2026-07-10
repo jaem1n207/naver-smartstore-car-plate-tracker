@@ -447,9 +447,114 @@ describe("GoogleSheetRepository", () => {
       MANAGED_TABS.definitions.map((definition, index) => ({
         sheetId: index + 1,
         index,
-        gridProperties: { frozenRowCount: 1 },
+        gridProperties: {
+          frozenRowCount: 1,
+          ...(definition.operatorFacing ? { frozenColumnCount: 2 } : {}),
+        },
       })),
     );
+  });
+
+  it("applies high-contrast headers, status colors, and duplicate group borders", async () => {
+    for (let index = 0; index < 6; index += 1) {
+      googleapisMock.queueGetValues([]);
+    }
+    const styledRow: SheetProductRow = {
+      ...baseRow,
+      productStatus: "OUTOFSTOCK",
+      displayStatus: "SUSPENSION",
+      duplicateStatus: "duplicated_both",
+    };
+    const repository = await createRepository();
+
+    await repository.writeViews([styledRow]);
+
+    const requests = googleapisMock.batchUpdateCalls.flatMap(
+      (call) => call.requestBody?.requests ?? [],
+    );
+    expect(requests).toContainEqual({
+      repeatCell: {
+        range: {
+          sheetId: 1,
+          startRowIndex: 0,
+          endRowIndex: 1,
+          startColumnIndex: 0,
+          endColumnIndex: 12,
+        },
+        cell: {
+          userEnteredFormat: {
+            backgroundColorStyle: rgbStyle("#174C3C"),
+            textFormat: {
+              bold: true,
+              foregroundColorStyle: rgbStyle("#FFFFFF"),
+            },
+            horizontalAlignment: "LEFT",
+            verticalAlignment: "MIDDLE",
+          },
+        },
+        fields:
+          "userEnteredFormat(backgroundColorStyle,textFormat.bold,textFormat.foregroundColorStyle,horizontalAlignment,verticalAlignment)",
+      },
+    });
+
+    const updateCellsRequest = requests
+      .filter(hasUpdateCellsRequest)
+      .find((request) => request.updateCells.start.sheetId === 1);
+    const formattedCells = updateCellsRequest?.updateCells.rows[0]?.values ?? [];
+    const statusBackgrounds = [1, 4, 5].map(
+      (columnIndex) => formattedCells[columnIndex]?.userEnteredFormat?.backgroundColorStyle,
+    );
+
+    expect(updateCellsRequest?.updateCells.start).toEqual({
+      sheetId: 1,
+      rowIndex: 1,
+      columnIndex: 0,
+    });
+    expect(formattedCells[2]?.userEnteredFormat?.textFormat?.foregroundColorStyle).toBeUndefined();
+    expect(new Set(statusBackgrounds.map((value) => JSON.stringify(value))).size).toBe(3);
+    expect(requests).toContainEqual({
+      updateBorders: {
+        range: {
+          sheetId: 1,
+          startRowIndex: 1,
+          endRowIndex: 2,
+          startColumnIndex: 0,
+          endColumnIndex: 12,
+        },
+        top: {
+          style: "SOLID_MEDIUM",
+          colorStyle: rgbStyle("#9A6700"),
+        },
+        bottom: {
+          style: "SOLID_MEDIUM",
+          colorStyle: rgbStyle("#9A6700"),
+        },
+      },
+    });
+  });
+
+  it("clears obsolete duplicate row colors on the next sync", async () => {
+    for (let index = 0; index < 12; index += 1) {
+      googleapisMock.queueGetValues([]);
+    }
+    const repository = await createRepository();
+
+    await repository.writeViews([
+      {
+        ...baseRow,
+        duplicateStatus: "duplicated_in_same_store",
+      },
+    ]);
+    await repository.writeViews([baseRow]);
+
+    const sheetOneUpdates = googleapisMock.batchUpdateCalls
+      .flatMap((call) => call.requestBody?.requests ?? [])
+      .filter(hasUpdateCellsRequest)
+      .filter((request) => request.updateCells.start.sheetId === 1);
+    const latestPlateFormat =
+      sheetOneUpdates.at(-1)?.updateCells.rows[0]?.values?.[0]?.userEnteredFormat;
+
+    expect(latestPlateFormat).toEqual({ textFormat: { bold: false } });
   });
 
   it("reads raw data from the Korean raw tab and parses sparse trailing cells", async () => {
@@ -970,6 +1075,26 @@ type UpdateTableRequestValue = {
   };
 };
 
+type UpdateCellsRequestValue = {
+  updateCells: {
+    start: {
+      sheetId: number;
+      rowIndex: number;
+      columnIndex: number;
+    };
+    rows: Array<{
+      values?: Array<{
+        userEnteredFormat?: {
+          backgroundColorStyle?: unknown;
+          textFormat?: {
+            foregroundColorStyle?: unknown;
+          };
+        };
+      }>;
+    }>;
+  };
+};
+
 function hasSheetIndexUpdate(value: unknown): value is SheetIndexUpdateRequest {
   if (!isRecord(value) || !isRecord(value.updateSheetProperties)) {
     return false;
@@ -986,6 +1111,25 @@ function hasAddTableRequest(value: unknown): value is AddTableRequestValue {
 
 function hasUpdateTableRequest(value: unknown): value is UpdateTableRequestValue {
   return isRecord(value) && isRecord(value.updateTable) && isRecord(value.updateTable.table);
+}
+
+function hasUpdateCellsRequest(value: unknown): value is UpdateCellsRequestValue {
+  return (
+    isRecord(value) &&
+    isRecord(value.updateCells) &&
+    isRecord(value.updateCells.start) &&
+    Array.isArray(value.updateCells.rows)
+  );
+}
+
+function rgbStyle(hex: string) {
+  return {
+    rgbColor: {
+      red: Number.parseInt(hex.slice(1, 3), 16) / 255,
+      green: Number.parseInt(hex.slice(3, 5), 16) / 255,
+      blue: Number.parseInt(hex.slice(5, 7), 16) / 255,
+    },
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
