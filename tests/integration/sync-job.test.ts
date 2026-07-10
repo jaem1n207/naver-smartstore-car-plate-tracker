@@ -4,6 +4,7 @@ import { loadStores } from "../../src/config/stores.js";
 import { MockNaverCommerceClient } from "../../src/naver/mock-client.js";
 import { ACROSS_STORES_DUPLICATES_TAB, EXTRACTION_FAILURES_TAB } from "../../src/sheets/columns.js";
 import { InMemorySheetRepository } from "../../src/sheets/in-memory-repository.js";
+import type { SheetProductRow } from "../../src/sheets/types.js";
 import { runSyncJob } from "../../src/sync/sync-job.js";
 
 const env = loadEnv({
@@ -89,4 +90,50 @@ describe("runSyncJob", () => {
     expect(row?.firstSeenAt).toBe("2026-01-01T00:00:00.000Z");
     expect(row?.manualNote).toBe("operator note");
   });
+
+  it("preserves rows from stores excluded from a store-scoped sync", async () => {
+    const sheets = new InMemorySheetRepository();
+    const configuredStores = loadStores(env);
+    sheets.rawRows = [existingStoreBRow()];
+
+    await runSyncJob({
+      env,
+      stores: [configuredStores[0]],
+      naverClient: new MockNaverCommerceClient(),
+      sheetRepository: sheets,
+      now: () => new Date("2026-07-09T00:00:00.000Z"),
+    });
+
+    expect(sheets.rawRows.filter((row) => row.storeKey === "A")).toHaveLength(3);
+    expect(sheets.rawRows.filter((row) => row.storeKey === "B")).toEqual([existingStoreBRow()]);
+    expect(sheets.runLogs[0]?.message).toBe(
+      "Store A (store-a) 3개 상품 선택 동기화 완료 (시트 전체 4개)",
+    );
+  });
 });
+
+function existingStoreBRow(): SheetProductRow {
+  return {
+    storeKey: "B",
+    storeName: "Store B (store-b)",
+    storeBaseUrl: "https://example.com/store-b",
+    channelProductNo: "2999",
+    originProductNo: "1999",
+    productUrl: "https://example.com/store-b/products/2999",
+    productName: "existing Store B product",
+    productStatus: "SALE",
+    displayStatus: "ON",
+    rawPlate: "999하9999",
+    normalizedPlate: "999하9999",
+    extractionStatus: "success",
+    duplicateStatus: "unique",
+    firstSeenAt: "2026-01-01T00:00:00.000Z",
+    lastSyncedAt: "2026-01-01T00:00:00.000Z",
+    lastErrorAt: "",
+    errorMessage: "",
+    detailContentHash: "existing-hash",
+    detailTextSnippet: "existing snippet",
+    apiTraceId: "",
+    manualNote: "preserve me",
+  };
+}

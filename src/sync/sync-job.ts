@@ -33,7 +33,9 @@ export async function runSyncJob(dependencies: SyncJobDependencies): Promise<Syn
   const runStartedAt = dependencies.now().toISOString();
   const existingRows = await dependencies.sheetRepository.readRawData();
   const existingRowsByProduct = mapRowsByProduct(existingRows);
-  const rows: SheetProductRow[] = [];
+  const selectedStoreKeys = new Set(dependencies.stores.map((store) => store.storeKey));
+  const rows = existingRows.filter((row) => !selectedStoreKeys.has(row.storeKey));
+  let syncedProductCount = 0;
 
   for (const store of dependencies.stores) {
     const summaries = await dependencies.naverClient.searchProducts(store);
@@ -49,6 +51,7 @@ export async function runSyncJob(dependencies: SyncJobDependencies): Promise<Syn
       );
 
       rows.push(createSheetProductRow(store, mergedProduct, existingRow, runStartedAt));
+      syncedProductCount += 1;
     }
   }
 
@@ -62,10 +65,22 @@ export async function runSyncJob(dependencies: SyncJobDependencies): Promise<Syn
     runFinishedAt: dependencies.now().toISOString(),
     mode: dependencies.env.naverApiMode,
     ...result,
-    message: `총 ${String(result.totalProducts)}개 상품 동기화 완료`,
+    message: syncRunMessage(dependencies.stores, syncedProductCount, result.totalProducts),
   });
 
   return result;
+}
+
+function syncRunMessage(
+  stores: readonly StoreConfig[],
+  syncedProductCount: number,
+  totalProducts: number,
+): string {
+  if (stores.length === 1) {
+    return `${stores[0]?.storeDisplayName ?? "선택 스토어"} ${String(syncedProductCount)}개 상품 선택 동기화 완료 (시트 전체 ${String(totalProducts)}개)`;
+  }
+
+  return `총 ${String(totalProducts)}개 상품 동기화 완료`;
 }
 
 type MergedProduct = {
