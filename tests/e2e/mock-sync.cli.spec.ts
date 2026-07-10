@@ -19,6 +19,21 @@ test("mock sync CLI exits successfully", async () => {
   expect(stdout).not.toContain("store-b-secret");
 });
 
+test("mock sync CLI accepts a Smartstore URL slug", async () => {
+  const { stdout, stderr } = await execFileAsync(
+    "node",
+    ["--import", "tsx", "src/cli/sync-once.ts", "--store=store-a"],
+    {
+      env: cliEnv(),
+      timeout: 20_000,
+    },
+  );
+
+  expect(stderr).toBe("");
+  expect(stdout).not.toContain("store-a-secret");
+  expect(stdout).not.toContain("store-b-secret");
+});
+
 function cliEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   delete env.FORCE_COLOR;

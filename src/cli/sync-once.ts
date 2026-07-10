@@ -2,6 +2,7 @@ import "dotenv/config";
 import pino from "pino";
 import { loadEnv } from "../config/env.js";
 import { loadStores } from "../config/stores.js";
+import { selectStoresFromArgs } from "./store-selection.js";
 import { runtimeSecretValues, safeErrorLog } from "../logging/safe-error.js";
 import { LiveNaverCommerceClient } from "../naver/client.js";
 import { MockNaverCommerceClient } from "../naver/mock-client.js";
@@ -13,6 +14,7 @@ async function main(): Promise<void> {
   const env = loadEnv();
   const logger = pino({ level: env.logLevel === "silent" ? "silent" : env.logLevel });
   const stores = loadStores(env);
+  const selectedStores = selectStoresFromArgs(stores, process.argv.slice(2));
   const naverClient =
     env.naverApiMode === "live"
       ? new LiveNaverCommerceClient({ baseUrl: env.naverApiBaseUrl })
@@ -30,7 +32,7 @@ async function main(): Promise<void> {
 
   const result = await runSyncJob({
     env,
-    stores,
+    stores: selectedStores,
     naverClient,
     sheetRepository,
     now: () => new Date(),
