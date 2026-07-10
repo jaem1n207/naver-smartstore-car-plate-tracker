@@ -7,6 +7,7 @@ import {
   B_STORE_VIEW_TAB,
   EXTRACTION_FAILURES_TAB,
 } from "./columns.js";
+import { sortOperatorRows } from "./operator-view.js";
 import type { RunLogRow, SheetProductRow, SheetRepository } from "./types.js";
 
 export class InMemorySheetRepository implements SheetRepository {
@@ -28,15 +29,17 @@ export class InMemorySheetRepository implements SheetRepository {
     const activeRows = rows.filter((row) => row.productStatus !== "DELETE");
 
     this.viewRows = {
-      [A_STORE_VIEW_TAB]: cloneRows(activeRows.filter(isStoreARow)),
-      [B_STORE_VIEW_TAB]: cloneRows(activeRows.filter(isStoreBRow)),
-      [A_STORE_DUPLICATES_TAB]: cloneRows(
+      [A_STORE_VIEW_TAB]: cloneOperatorRows(activeRows.filter(isStoreARow)),
+      [B_STORE_VIEW_TAB]: cloneOperatorRows(activeRows.filter(isStoreBRow)),
+      [A_STORE_DUPLICATES_TAB]: cloneOperatorRows(
         activeRows.filter((row) => isStoreARow(row) && isSameStoreOnlyDuplicate(row)),
       ),
-      [B_STORE_DUPLICATES_TAB]: cloneRows(
+      [B_STORE_DUPLICATES_TAB]: cloneOperatorRows(
         activeRows.filter((row) => isStoreBRow(row) && isSameStoreOnlyDuplicate(row)),
       ),
-      [ACROSS_STORES_DUPLICATES_TAB]: cloneRows(activeRows.filter(hasAcrossStoresDuplicate)),
+      [ACROSS_STORES_DUPLICATES_TAB]: cloneOperatorRows(
+        activeRows.filter(hasAcrossStoresDuplicate),
+      ),
       [EXTRACTION_FAILURES_TAB]: cloneRows(activeRows.filter(hasExtractionFailure)),
     };
 
@@ -52,6 +55,10 @@ export class InMemorySheetRepository implements SheetRepository {
 
 function cloneRows(rows: SheetProductRow[]): SheetProductRow[] {
   return structuredClone(rows);
+}
+
+function cloneOperatorRows(rows: SheetProductRow[]): SheetProductRow[] {
+  return cloneRows(sortOperatorRows(rows));
 }
 
 function isStoreARow(row: SheetProductRow): boolean {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   A_STORE_DUPLICATES_TAB,
+  A_STORE_VIEW_TAB,
   ACROSS_STORES_DUPLICATES_TAB,
   B_STORE_DUPLICATES_TAB,
   EXTRACTION_FAILURES_TAB,
@@ -89,6 +90,33 @@ describe("InMemorySheetRepository", () => {
     firstRow(readRows).productName = "changed after read";
 
     expect(firstRow(repository.rawRows).productName).toBe("Synthetic product");
+  });
+
+  it("groups duplicate plates before unique inventory rows", async () => {
+    const repository = new InMemorySheetRepository();
+    const uniqueRow: SheetProductRow = {
+      ...baseRow,
+      channelProductNo: "3001",
+      normalizedPlate: "999라9999",
+    };
+    const secondDuplicateRow: SheetProductRow = {
+      ...baseRow,
+      channelProductNo: "2002",
+      normalizedPlate: "111가1111",
+      duplicateStatus: "duplicated_in_same_store",
+    };
+    const firstDuplicateRow: SheetProductRow = {
+      ...secondDuplicateRow,
+      channelProductNo: "2001",
+    };
+
+    await repository.writeViews([uniqueRow, secondDuplicateRow, firstDuplicateRow]);
+
+    expect(repository.viewRows[A_STORE_VIEW_TAB]?.map((row) => row.channelProductNo)).toEqual([
+      "2001",
+      "2002",
+      "3001",
+    ]);
   });
 });
 
