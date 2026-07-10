@@ -23,4 +23,4 @@ Use shadcn `Card`, `Table`, and `Badge` for dashboard-style status views. Use `B
 
 ## Google Sheets Exception
 
-Google Sheets is the MVP operator UI and cannot use Tailwind or shadcn directly. Keep Sheets formatting deterministic through repository writes and document any view formatting in operations docs.
+Google Sheets is the MVP operator UI and cannot use Tailwind or shadcn directly. Use native Sheets tables for headers, filters, and alternating row bands. Keep operator columns decision-first and limited to the documented projection; keep implementation metadata in developer tabs. Apply tab order, column widths, hidden obsolete columns, and table ranges deterministically through repository writes.
