@@ -7,11 +7,13 @@ import { z } from "zod";
 import type { DuplicateStatus } from "../domain/duplicates/types.js";
 import {
   createManagedSheetTabs,
+  OPERATOR_VIEW_HEADERS,
   RAW_DATA_COLUMNS,
   RAW_DATA_HEADERS,
   RAW_DATA_TAB,
   RUN_LOG_HEADERS,
   RUN_LOG_TAB,
+  sheetProductRowToOperatorValues,
   sheetProductRowToValues,
   valuesToSheetProductRow,
 } from "./columns.js";
@@ -21,6 +23,16 @@ import type { RunLogRow, SheetProductRow, SheetRepository } from "./types.js";
 const SPREADSHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const RAW_DATA_END_COLUMN = columnNameForColumnCount(RAW_DATA_COLUMNS.length);
 const RUN_LOG_END_COLUMN = columnNameForColumnCount(RUN_LOG_HEADERS.length);
+const MAX_MANAGED_PRODUCT_COLUMNS = RAW_DATA_COLUMNS.length;
+const MIN_TABLE_ROW_COUNT = 2;
+const OPERATOR_COLUMN_WIDTHS: readonly number[] = [120, 160, 320, 220, 100];
+
+type ManagedTableSpec = {
+  readonly name: string;
+  readonly range: sheets_v4.Schema$GridRange;
+  readonly columnProperties: sheets_v4.Schema$TableColumnProperties[];
+  readonly rowsProperties: sheets_v4.Schema$TableRowsProperties;
+};
 
 const GoogleServiceAccountCredentialsSchema = z.object({
   type: z.literal("service_account"),
@@ -44,6 +56,9 @@ export class GoogleSheetRepository implements SheetRepository {
   private readonly sheets: sheets_v4.Sheets;
   private readonly tabDefinitions: readonly SheetTabDefinition[];
   private readonly tabNames: SheetTabNames;
+  private readonly sheetIdsByTitle = new Map<string, number>();
+  private readonly gridColumnCountsByTitle = new Map<string, number>();
+  private readonly tableIdsByTitle = new Map<string, string>();
   private initializeTabsPromise: Promise<void> | undefined;
 
   constructor(options: GoogleSheetRepositoryOptions) {
@@ -80,7 +95,7 @@ export class GoogleSheetRepository implements SheetRepository {
 
   async writeRawData(rows: SheetProductRow[]): Promise<void> {
     await this.ensureTabs();
-    await this.replaceSheet(RAW_DATA_TAB, viewValues(rows));
+    await this.replaceSheet(RAW_DATA_TAB, rawDataValues(rows));
   }
 
   async writeViews(rows: SheetProductRow[]): Promise<void> {
@@ -88,24 +103,44 @@ export class GoogleSheetRepository implements SheetRepository {
 
     const activeRows = rows.filter(isActiveProductRow);
 
-    await this.replaceSheet(this.tabNames.storeAView, viewValues(activeRows.filter(isStoreARow)));
-    await this.replaceSheet(this.tabNames.storeBView, viewValues(activeRows.filter(isStoreBRow)));
     await this.replaceSheet(
-      this.tabNames.acrossStoresDuplicates,
-      viewValues(activeRows.filter(hasAcrossStoresDuplicate)),
+      this.tabNames.storeAView,
+      operatorViewValues(activeRows.filter(isStoreARow)),
     );
     await this.replaceSheet(
-      this.tabNames.sameStoreDuplicates,
-      viewValues(activeRows.filter(hasSameStoreDuplicate)),
+      this.tabNames.storeBView,
+      operatorViewValues(activeRows.filter(isStoreBRow)),
+    );
+    await this.replaceSheet(
+      this.tabNames.storeADuplicates,
+      operatorViewValues(
+        activeRows.filter((row) => isStoreARow(row) && isSameStoreOnlyDuplicate(row)),
+      ),
+    );
+    await this.replaceSheet(
+      this.tabNames.storeBDuplicates,
+      operatorViewValues(
+        activeRows.filter((row) => isStoreBRow(row) && isSameStoreOnlyDuplicate(row)),
+      ),
+    );
+    await this.replaceSheet(
+      this.tabNames.acrossStoresDuplicates,
+      operatorViewValues(activeRows.filter(hasAcrossStoresDuplicate)),
     );
     await this.replaceSheet(
       this.tabNames.extractionFailures,
-      viewValues(activeRows.filter(hasExtractionFailure)),
+      rawDataValues(activeRows.filter(hasExtractionFailure)),
     );
   }
 
   async appendRunLog(row: RunLogRow): Promise<void> {
     await this.ensureTabs();
+    const currentValuesResponse = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: sheetRange(RUN_LOG_TAB, `A:${RUN_LOG_END_COLUMN}`),
+    });
+    const currentRowCount = googleValuesToRows(currentValuesResponse.data.values).length;
+
     await this.sheets.spreadsheets.values.update({
       spreadsheetId: this.spreadsheetId,
       range: sheetRange(RUN_LOG_TAB, `A1:${RUN_LOG_END_COLUMN}1`),
@@ -134,6 +169,10 @@ export class GoogleSheetRepository implements SheetRepository {
         ],
       },
     });
+    await this.syncManagedTable(
+      this.definitionForTitle(RUN_LOG_TAB),
+      Math.max(currentRowCount + 1, MIN_TABLE_ROW_COUNT),
+    );
   }
 
   private ensureTabs(): Promise<void> {
@@ -146,57 +185,158 @@ export class GoogleSheetRepository implements SheetRepository {
   }
 
   private async initializeTabs(): Promise<void> {
-    const response = await this.sheets.spreadsheets.get({
-      spreadsheetId: this.spreadsheetId,
-      fields: "sheets.properties(sheetId,title)",
-    });
-    const sheetIdsByTitle = collectSheetIdsByTitle(response.data.sheets);
-    const requests: sheets_v4.Schema$Request[] = [];
+    const initialSheets = await this.fetchSheetMetadata();
+    const initialSheetIdsByTitle = collectSheetIdsByTitle(initialSheets);
+    const bootstrapRequests: sheets_v4.Schema$Request[] = [];
 
     for (const tab of this.tabDefinitions) {
-      const localizedSheetId = sheetIdsByTitle.get(tab.title);
+      const localizedSheetId = initialSheetIdsByTitle.get(tab.title);
 
       if (localizedSheetId !== undefined) {
-        requests.push(freezeHeaderRowRequest(localizedSheetId));
         continue;
       }
 
-      const legacySheetId = firstExistingSheetId(sheetIdsByTitle, tab.legacyTitles);
+      const legacySheetId = firstExistingSheetId(initialSheetIdsByTitle, tab.legacyTitles);
 
       if (legacySheetId !== undefined) {
-        requests.push(renameAndFreezeSheetRequest(legacySheetId, tab.title));
+        bootstrapRequests.push(renameSheetRequest(legacySheetId, tab.title));
         continue;
       }
 
-      requests.push(addSheetRequest(tab.title, tab.columnCount));
+      bootstrapRequests.push(addSheetRequest(tab.title, tab.columnCount));
     }
 
-    if (requests.length === 0) {
-      return;
+    if (bootstrapRequests.length > 0) {
+      await this.sheets.spreadsheets.batchUpdate({
+        spreadsheetId: this.spreadsheetId,
+        requestBody: { requests: bootstrapRequests },
+      });
     }
+
+    const finalSheets =
+      bootstrapRequests.length > 0 ? await this.fetchSheetMetadata() : initialSheets;
+    this.captureManagedSheetMetadata(finalSheets);
+    const layoutRequests = createManagedLayoutRequests(
+      this.tabDefinitions,
+      this.sheetIdsByTitle,
+      this.gridColumnCountsByTitle,
+    );
 
     await this.sheets.spreadsheets.batchUpdate({
       spreadsheetId: this.spreadsheetId,
-      requestBody: { requests },
+      requestBody: { requests: layoutRequests },
     });
   }
 
+  private async fetchSheetMetadata(): Promise<sheets_v4.Schema$Sheet[]> {
+    const response = await this.sheets.spreadsheets.get({
+      spreadsheetId: this.spreadsheetId,
+      fields:
+        "sheets(properties(sheetId,title,index,gridProperties(columnCount)),tables(tableId,name,range))",
+    });
+
+    return response.data.sheets ?? [];
+  }
+
+  private captureManagedSheetMetadata(sheets: readonly sheets_v4.Schema$Sheet[]): void {
+    this.sheetIdsByTitle.clear();
+    this.gridColumnCountsByTitle.clear();
+    this.tableIdsByTitle.clear();
+
+    for (const sheet of sheets) {
+      const sheetId = sheet.properties?.sheetId;
+      const title = sheet.properties?.title;
+
+      if (typeof sheetId !== "number" || typeof title !== "string") {
+        continue;
+      }
+
+      this.sheetIdsByTitle.set(title, sheetId);
+
+      const columnCount = sheet.properties?.gridProperties?.columnCount;
+
+      if (typeof columnCount === "number") {
+        this.gridColumnCountsByTitle.set(title, columnCount);
+      }
+
+      const managedTable = firstTableStartingAtFirstCell(sheet.tables);
+      const tableId = managedTable?.tableId;
+
+      if (typeof tableId === "string") {
+        this.tableIdsByTitle.set(title, tableId);
+      }
+    }
+  }
+
   private async replaceSheet(tabName: string, values: string[][]): Promise<void> {
+    const definition = this.definitionForTitle(tabName);
+    const gridColumnCount = this.gridColumnCountsByTitle.get(tabName) ?? definition.columnCount;
+    const clearColumnCount = Math.max(
+      definition.columnCount,
+      Math.min(gridColumnCount, MAX_MANAGED_PRODUCT_COLUMNS),
+    );
+    const clearEndColumn = columnNameForColumnCount(clearColumnCount);
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: sheetRange(tabName, `A:${RAW_DATA_END_COLUMN}`),
+      range: sheetRange(tabName, `A:${clearEndColumn}`),
     });
     const currentRowCount = googleValuesToRows(response.data.values).length;
-    const targetRowCount = Math.max(currentRowCount, values.length);
+    const tableRowCount = Math.max(values.length, MIN_TABLE_ROW_COUNT);
+    const targetRowCount = Math.max(currentRowCount, tableRowCount);
 
     await this.sheets.spreadsheets.values.update({
       spreadsheetId: this.spreadsheetId,
-      range: sheetRange(tabName, `A1:${RAW_DATA_END_COLUMN}${String(targetRowCount)}`),
+      range: sheetRange(tabName, `A1:${clearEndColumn}${String(targetRowCount)}`),
       valueInputOption: "RAW",
       requestBody: {
-        values: padRows(values, targetRowCount),
+        values: padRowsAndColumns(values, targetRowCount, clearColumnCount),
       },
     });
+    await this.syncManagedTable(definition, tableRowCount);
+  }
+
+  private definitionForTitle(title: string): SheetTabDefinition {
+    const definition = this.tabDefinitions.find((candidate) => candidate.title === title);
+
+    if (definition === undefined) {
+      throw new Error(`관리 대상 시트 정의를 찾을 수 없습니다: ${title}`);
+    }
+
+    return definition;
+  }
+
+  private async syncManagedTable(definition: SheetTabDefinition, rowCount: number): Promise<void> {
+    const sheetId = this.sheetIdsByTitle.get(definition.title);
+
+    if (sheetId === undefined) {
+      throw new Error(`관리 대상 시트 ID를 찾을 수 없습니다: ${definition.title}`);
+    }
+
+    const existingTableId = this.tableIdsByTitle.get(definition.title);
+    const table = managedTable(definition, sheetId, rowCount);
+    const request: sheets_v4.Schema$Request =
+      existingTableId === undefined
+        ? { addTable: { table } }
+        : {
+            updateTable: {
+              table: {
+                tableId: existingTableId,
+                range: table.range,
+                columnProperties: table.columnProperties,
+                rowsProperties: table.rowsProperties,
+              },
+              fields: "range,columnProperties,rowsProperties",
+            },
+          };
+    const response = await this.sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
+      requestBody: { requests: [request] },
+    });
+    const addedTableId = response.data.replies?.[0]?.addTable?.table?.tableId;
+
+    if (typeof addedTableId === "string") {
+      this.tableIdsByTitle.set(definition.title, addedTableId);
+    }
   }
 }
 
@@ -215,8 +355,12 @@ function firstExistingSheetId(
   return undefined;
 }
 
-function viewValues(rows: SheetProductRow[]): string[][] {
+function rawDataValues(rows: SheetProductRow[]): string[][] {
   return [RAW_DATA_HEADERS, ...rows.map(sheetProductRowToValues)];
+}
+
+function operatorViewValues(rows: SheetProductRow[]): string[][] {
+  return [OPERATOR_VIEW_HEADERS, ...rows.map(sheetProductRowToOperatorValues)];
 }
 
 function googleValuesToRows(values: unknown): unknown[][] {
@@ -247,18 +391,32 @@ function parseRawDataRow(row: unknown[], sheetRowNumber: number): SheetProductRo
   }
 }
 
-function padRows(rows: string[][], targetRowCount: number): string[][] {
-  const paddedRows = [...rows];
+function padRowsAndColumns(
+  rows: string[][],
+  targetRowCount: number,
+  targetColumnCount: number,
+): string[][] {
+  const paddedRows = rows.map((row) => padColumns(row, targetColumnCount));
 
   while (paddedRows.length < targetRowCount) {
-    paddedRows.push(blankRawDataRow());
+    paddedRows.push(blankRow(targetColumnCount));
   }
 
   return paddedRows;
 }
 
-function blankRawDataRow(): string[] {
-  return RAW_DATA_COLUMNS.map(() => "");
+function padColumns(row: readonly string[], targetColumnCount: number): string[] {
+  const paddedRow = [...row];
+
+  while (paddedRow.length < targetColumnCount) {
+    paddedRow.push("");
+  }
+
+  return paddedRow;
+}
+
+function blankRow(columnCount: number): string[] {
+  return Array.from({ length: columnCount }, () => "");
 }
 
 function columnNameForColumnCount(columnCount: number): string {
@@ -295,27 +453,14 @@ function collectSheetIdsByTitle(
   return sheetIdsByTitle;
 }
 
-function freezeHeaderRowRequest(sheetId: number): sheets_v4.Schema$Request {
-  return {
-    updateSheetProperties: {
-      properties: {
-        sheetId,
-        gridProperties: { frozenRowCount: 1 },
-      },
-      fields: "gridProperties.frozenRowCount",
-    },
-  };
-}
-
-function renameAndFreezeSheetRequest(sheetId: number, title: string): sheets_v4.Schema$Request {
+function renameSheetRequest(sheetId: number, title: string): sheets_v4.Schema$Request {
   return {
     updateSheetProperties: {
       properties: {
         sheetId,
         title,
-        gridProperties: { frozenRowCount: 1 },
       },
-      fields: "title,gridProperties.frozenRowCount",
+      fields: "title",
     },
   };
 }
@@ -332,6 +477,110 @@ function addSheetRequest(title: string, columnCount: number): sheets_v4.Schema$R
       },
     },
   };
+}
+
+function createManagedLayoutRequests(
+  definitions: readonly SheetTabDefinition[],
+  sheetIdsByTitle: ReadonlyMap<string, number>,
+  gridColumnCountsByTitle: ReadonlyMap<string, number>,
+): sheets_v4.Schema$Request[] {
+  const requests: sheets_v4.Schema$Request[] = [];
+
+  definitions.forEach((definition, index) => {
+    const sheetId = sheetIdsByTitle.get(definition.title);
+
+    if (sheetId === undefined) {
+      throw new Error(`관리 대상 시트 ID를 찾을 수 없습니다: ${definition.title}`);
+    }
+
+    requests.push({
+      updateSheetProperties: {
+        properties: {
+          sheetId,
+          index,
+          gridProperties: { frozenRowCount: 1 },
+        },
+        fields: "index,gridProperties.frozenRowCount",
+      },
+    });
+
+    if (!definition.operatorFacing) {
+      return;
+    }
+
+    for (const [columnIndex, pixelSize] of OPERATOR_COLUMN_WIDTHS.entries()) {
+      requests.push({
+        updateDimensionProperties: {
+          range: {
+            sheetId,
+            dimension: "COLUMNS",
+            startIndex: columnIndex,
+            endIndex: columnIndex + 1,
+          },
+          properties: { pixelSize, hiddenByUser: false },
+          fields: "pixelSize,hiddenByUser",
+        },
+      });
+    }
+
+    const gridColumnCount = gridColumnCountsByTitle.get(definition.title) ?? definition.columnCount;
+
+    if (gridColumnCount > definition.columnCount) {
+      requests.push({
+        updateDimensionProperties: {
+          range: {
+            sheetId,
+            dimension: "COLUMNS",
+            startIndex: definition.columnCount,
+            endIndex: gridColumnCount,
+          },
+          properties: { hiddenByUser: true },
+          fields: "hiddenByUser",
+        },
+      });
+    }
+  });
+
+  return requests;
+}
+
+function firstTableStartingAtFirstCell(
+  tables: sheets_v4.Schema$Table[] | null | undefined,
+): sheets_v4.Schema$Table | undefined {
+  return (tables ?? []).find(
+    (table) =>
+      (table.range?.startRowIndex ?? 0) === 0 && (table.range?.startColumnIndex ?? 0) === 0,
+  );
+}
+
+function managedTable(
+  definition: SheetTabDefinition,
+  sheetId: number,
+  rowCount: number,
+): ManagedTableSpec {
+  return {
+    name: definition.tableName,
+    range: {
+      sheetId,
+      startRowIndex: 0,
+      endRowIndex: rowCount,
+      startColumnIndex: 0,
+      endColumnIndex: definition.columnCount,
+    },
+    columnProperties: definition.headers.map((header, columnIndex) => ({
+      columnIndex,
+      columnName: header,
+    })),
+    rowsProperties: {
+      headerColorStyle: rgbColorStyle(0.87, 0.93, 0.9),
+      firstBandColorStyle: rgbColorStyle(1, 1, 1),
+      secondBandColorStyle: rgbColorStyle(0.96, 0.97, 0.97),
+    },
+  };
+}
+
+function rgbColorStyle(red: number, green: number, blue: number): sheets_v4.Schema$ColorStyle {
+  return { rgbColor: { red, green, blue } };
 }
 
 function decodeServiceAccountCredentials(encodedJson: string | undefined) {
@@ -372,8 +621,8 @@ function hasAcrossStoresDuplicate(row: SheetProductRow): boolean {
   return isDuplicateStatus(row.duplicateStatus, "duplicated_across_stores", "duplicated_both");
 }
 
-function hasSameStoreDuplicate(row: SheetProductRow): boolean {
-  return isDuplicateStatus(row.duplicateStatus, "duplicated_in_same_store", "duplicated_both");
+function isSameStoreOnlyDuplicate(row: SheetProductRow): boolean {
+  return row.duplicateStatus === "duplicated_in_same_store";
 }
 
 function hasExtractionFailure(row: SheetProductRow): boolean {

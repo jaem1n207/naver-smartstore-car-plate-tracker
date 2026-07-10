@@ -3,8 +3,10 @@ import type { DuplicateStatus } from "../../src/domain/duplicates/types.js";
 import type { PlateExtractionStatus } from "../../src/domain/plate/types.js";
 import {
   createManagedSheetTabs,
+  OPERATOR_VIEW_HEADERS,
   RAW_DATA_COLUMNS,
   RAW_DATA_HEADERS,
+  sheetProductRowToOperatorValues,
   sheetProductRowToValues,
   valuesToSheetProductRow,
 } from "../../src/sheets/columns.js";
@@ -94,11 +96,46 @@ describe("sheet row column helpers", () => {
 
     expect(tabs.names.storeAView).toBe("동부트럭 (store-east) 매물");
     expect(tabs.names.storeBView).toBe("서부트럭 (store-west) 매물");
+    expect(tabs.names.storeADuplicates).toBe("동부트럭 (store-east) 내부 차량번호 중복");
+    expect(tabs.names.storeBDuplicates).toBe("서부트럭 (store-west) 내부 차량번호 중복");
     expect(tabs.names.acrossStoresDuplicates).toBe(
-      "동부트럭 (store-east)·서부트럭 (store-west) 공통 매물",
+      "동부트럭 (store-east)·서부트럭 (store-west) 차량번호 중복",
     );
-    expect(tabs.definitions[1]?.legacyTitles).toEqual(["A스토어 매물", "A_Store_View"]);
-    expect(tabs.definitions[2]?.legacyTitles).toEqual(["B스토어 매물", "B_Store_View"]);
+    expect(tabs.definitions.map((definition) => definition.title)).toEqual([
+      tabs.names.storeAView,
+      tabs.names.storeBView,
+      tabs.names.storeADuplicates,
+      tabs.names.storeBDuplicates,
+      tabs.names.acrossStoresDuplicates,
+      tabs.names.rawData,
+      tabs.names.extractionFailures,
+      tabs.names.runLog,
+    ]);
+    expect(tabs.definitions.slice(0, 5).map((definition) => definition.columnCount)).toEqual([
+      5, 5, 5, 5, 5,
+    ]);
+  });
+
+  it("projects operator rows in decision-first column order", () => {
+    const duplicateRow: SheetProductRow = {
+      ...baseRow,
+      duplicateStatus: "duplicated_both",
+    };
+
+    expect(OPERATOR_VIEW_HEADERS).toEqual([
+      "차량번호",
+      "중복 상태",
+      "상품 URL",
+      "스토어 표시명",
+      "전시 상태",
+    ]);
+    expect(sheetProductRowToOperatorValues(duplicateRow)).toEqual([
+      "123가4567",
+      "내부 및 양쪽 중복",
+      "https://example.com/store-a/products/2001",
+      "Store A",
+      "ON",
+    ]);
   });
 
   it("sanitizes invalid Google Sheets title characters and caps title length", () => {

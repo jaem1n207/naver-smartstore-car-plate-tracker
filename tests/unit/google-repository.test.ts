@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createManagedSheetTabs,
+  OPERATOR_VIEW_HEADERS,
   RAW_DATA_COLUMNS,
   RAW_DATA_HEADERS,
   RUN_LOG_HEADERS,
+  sheetProductRowToOperatorValues,
   sheetProductRowToValues,
 } from "../../src/sheets/columns.js";
 import type { SheetTabDefinition } from "../../src/sheets/columns.js";
 import type { GoogleSheetRepositoryOptions } from "../../src/sheets/google-repository.js";
-import type { SheetProductRow, SheetRepository } from "../../src/sheets/types.js";
+import type { RunLogRow, SheetProductRow, SheetRepository } from "../../src/sheets/types.js";
 
 type AuthOptions = {
   scopes?: string[];
@@ -70,7 +72,22 @@ type SpreadsheetResponse = {
       properties?: {
         sheetId?: number;
         title?: string;
+        index?: number;
+        gridProperties?: {
+          columnCount?: number;
+        };
       };
+      tables?: Array<{
+        tableId?: string;
+        name?: string;
+        range?: {
+          sheetId?: number;
+          startRowIndex?: number;
+          endRowIndex?: number;
+          startColumnIndex?: number;
+          endColumnIndex?: number;
+        };
+      }>;
     }>;
   };
 };
@@ -82,7 +99,15 @@ type ValueRangeResponse = {
 };
 
 type UpdateResponse = {
-  data: Record<string, never>;
+  data: {
+    replies?: Array<{
+      addTable?: {
+        table?: {
+          tableId?: string;
+        };
+      };
+    }>;
+  };
 };
 
 const googleapisMock = vi.hoisted(() => {
@@ -95,6 +120,7 @@ const googleapisMock = vi.hoisted(() => {
   const appendCalls: ValuesAppendParams[] = [];
   const spreadsheetResponses: SpreadsheetResponse[] = [];
   const valueResponses: ValueRangeResponse[] = [];
+  let nextTableId = 100;
 
   function GoogleAuth(options: AuthOptions): void {
     authCalls.push(options);
@@ -109,8 +135,17 @@ const googleapisMock = vi.hoisted(() => {
 
   function batchUpdate(params: SpreadsheetBatchUpdateParams): Promise<UpdateResponse> {
     batchUpdateCalls.push(params);
+    const replies = (params.requestBody?.requests ?? []).map((request) => {
+      if (hasAddTable(request)) {
+        nextTableId += 1;
 
-    return Promise.resolve({ data: {} });
+        return { addTable: { table: { tableId: String(nextTableId) } } };
+      }
+
+      return {};
+    });
+
+    return Promise.resolve({ data: { replies } });
   }
 
   function valuesGet(params: ValuesGetParams): Promise<ValueRangeResponse> {
@@ -151,9 +186,22 @@ const googleapisMock = vi.hoisted(() => {
   function queueSpreadsheetTitles(titles: readonly string[]): void {
     spreadsheetResponses.push({
       data: {
-        sheets: titles.map((title, index) => ({ properties: { sheetId: index + 1, title } })),
+        sheets: titles.map((title, index) => ({
+          properties: {
+            sheetId: index + 1,
+            title,
+            index,
+            gridProperties: { columnCount: 21 },
+          },
+        })),
       },
     });
+  }
+
+  function queueSpreadsheetSheets(
+    sheets: NonNullable<SpreadsheetResponse["data"]["sheets"]>,
+  ): void {
+    spreadsheetResponses.push({ data: { sheets } });
   }
 
   function queueGetValues(values: unknown[][]): void {
@@ -170,27 +218,84 @@ const googleapisMock = vi.hoisted(() => {
     appendCalls.splice(0);
     spreadsheetResponses.splice(0);
     valueResponses.splice(0);
+    nextTableId = 100;
   }
 
   function localizedSheetsResponse(): SpreadsheetResponse {
     return {
       data: {
         sheets: [
-          { properties: { sheetId: 1, title: "원본 데이터" } },
-          { properties: { sheetId: 2, title: "동부트럭 (store-east) 매물" } },
-          { properties: { sheetId: 3, title: "서부트럭 (store-west) 매물" } },
+          {
+            properties: {
+              sheetId: 1,
+              title: "동부트럭 (store-east) 매물",
+              index: 0,
+              gridProperties: { columnCount: 5 },
+            },
+          },
+          {
+            properties: {
+              sheetId: 2,
+              title: "서부트럭 (store-west) 매물",
+              index: 1,
+              gridProperties: { columnCount: 5 },
+            },
+          },
+          {
+            properties: {
+              sheetId: 3,
+              title: "동부트럭 (store-east) 내부 차량번호 중복",
+              index: 2,
+              gridProperties: { columnCount: 5 },
+            },
+          },
           {
             properties: {
               sheetId: 4,
-              title: "동부트럭 (store-east)·서부트럭 (store-west) 공통 매물",
+              title: "서부트럭 (store-west) 내부 차량번호 중복",
+              index: 3,
+              gridProperties: { columnCount: 5 },
             },
           },
-          { properties: { sheetId: 5, title: "스토어 내부 중복" } },
-          { properties: { sheetId: 6, title: "차량번호 추출 실패" } },
-          { properties: { sheetId: 7, title: "실행 기록" } },
+          {
+            properties: {
+              sheetId: 5,
+              title: "동부트럭 (store-east)·서부트럭 (store-west) 차량번호 중복",
+              index: 4,
+              gridProperties: { columnCount: 5 },
+            },
+          },
+          {
+            properties: {
+              sheetId: 6,
+              title: "원본 데이터",
+              index: 5,
+              gridProperties: { columnCount: 21 },
+            },
+          },
+          {
+            properties: {
+              sheetId: 7,
+              title: "차량번호 추출 실패",
+              index: 6,
+              gridProperties: { columnCount: 21 },
+            },
+          },
+          {
+            properties: {
+              sheetId: 8,
+              title: "실행 기록",
+              index: 7,
+              gridProperties: { columnCount: 8 },
+            },
+          },
         ],
       },
     };
+  }
+
+  function hasAddTable(request: unknown): request is { addTable: unknown } {
+    return typeof request === "object" && request !== null && "addTable" in request;
   }
 
   return {
@@ -198,6 +303,7 @@ const googleapisMock = vi.hoisted(() => {
     authCalls,
     batchUpdateCalls,
     queueGetValues,
+    queueSpreadsheetSheets,
     queueSpreadsheetTitles,
     reset,
     sheetsCalls,
@@ -256,13 +362,9 @@ describe("GoogleSheetRepository", () => {
 
     await repository.readRawData();
 
-    expect(googleapisMock.spreadsheetGetCalls).toEqual([
-      {
-        spreadsheetId: "spreadsheet-id",
-        fields: "sheets.properties(sheetId,title)",
-      },
-    ]);
-    const requests = only(googleapisMock.batchUpdateCalls).requestBody?.requests ?? [];
+    expect(googleapisMock.spreadsheetGetCalls).toHaveLength(2);
+    expect(googleapisMock.spreadsheetGetCalls.every(hasManagedMetadataFields)).toBe(true);
+    const requests = googleapisMock.batchUpdateCalls[0]?.requestBody?.requests ?? [];
     expect(requests).toHaveLength(MANAGED_TABS.definitions.length);
     expect(requests).toEqual(
       MANAGED_TABS.definitions.map((tab) => ({
@@ -280,45 +382,44 @@ describe("GoogleSheetRepository", () => {
   });
 
   it("renames legacy English tabs to Korean without replacing their data", async () => {
-    googleapisMock.queueSpreadsheetTitles(MANAGED_TABS.definitions.map(lastLegacyTitle));
+    googleapisMock.queueSpreadsheetTitles(
+      MANAGED_TABS.definitions.map((tab, index) => legacyTitleOrPlaceholder(tab, index, "last")),
+    );
     const repository = await createRepository();
 
     await repository.readRawData();
 
-    const requests = only(googleapisMock.batchUpdateCalls).requestBody?.requests ?? [];
-    expect(requests).toEqual(
-      MANAGED_TABS.definitions.map((tab, index) => ({
-        updateSheetProperties: {
-          properties: {
-            sheetId: index + 1,
-            title: tab.title,
-            gridProperties: { frozenRowCount: 1 },
-          },
-          fields: "title,gridProperties.frozenRowCount",
+    const requests = googleapisMock.batchUpdateCalls[0]?.requestBody?.requests ?? [];
+    expect(requests.filter(hasRenameSheetRequest)).toHaveLength(7);
+    expect(requests).toContainEqual({
+      addSheet: {
+        properties: {
+          title: MANAGED_TABS.names.storeBDuplicates,
+          gridProperties: { columnCount: 5, frozenRowCount: 1 },
         },
-      })),
-    );
+      },
+    });
   });
 
   it("renames the previous generic Korean store tabs to configured store names", async () => {
-    googleapisMock.queueSpreadsheetTitles(MANAGED_TABS.definitions.map(firstLegacyTitle));
+    googleapisMock.queueSpreadsheetTitles(
+      MANAGED_TABS.definitions.map((tab, index) => legacyTitleOrPlaceholder(tab, index, "first")),
+    );
     const repository = await createRepository();
 
     await repository.readRawData();
 
-    const requests = only(googleapisMock.batchUpdateCalls).requestBody?.requests ?? [];
-    expect(requests).toEqual(
-      MANAGED_TABS.definitions.map((tab, index) => ({
-        updateSheetProperties: {
-          properties: {
-            sheetId: index + 1,
-            title: tab.title,
-            gridProperties: { frozenRowCount: 1 },
-          },
-          fields: "title,gridProperties.frozenRowCount",
+    const requests = googleapisMock.batchUpdateCalls[0]?.requestBody?.requests ?? [];
+    expect(requests.filter(hasRenameSheetRequest)).toHaveLength(7);
+    expect(requests).toContainEqual({
+      updateSheetProperties: {
+        properties: {
+          sheetId: 1,
+          title: MANAGED_TABS.names.storeAView,
         },
-      })),
-    );
+        fields: "title",
+      },
+    });
   });
 
   it("initializes tabs once per repository instance", async () => {
@@ -328,6 +429,27 @@ describe("GoogleSheetRepository", () => {
     await repository.writeRawData([]);
 
     expect(googleapisMock.spreadsheetGetCalls).toHaveLength(1);
+  });
+
+  it("orders operator tabs before developer tabs", async () => {
+    const repository = await createRepository();
+
+    await repository.readRawData();
+
+    const requests = googleapisMock.batchUpdateCalls.flatMap(
+      (call) => call.requestBody?.requests ?? [],
+    );
+    const indexUpdates = requests
+      .filter(hasSheetIndexUpdate)
+      .map((request) => request.updateSheetProperties.properties);
+
+    expect(indexUpdates).toEqual(
+      MANAGED_TABS.definitions.map((definition, index) => ({
+        sheetId: index + 1,
+        index,
+        gridProperties: { frozenRowCount: 1 },
+      })),
+    );
   });
 
   it("reads raw data from the Korean raw tab and parses sparse trailing cells", async () => {
@@ -386,7 +508,7 @@ describe("GoogleSheetRepository", () => {
   });
 
   it("writes every derived view to its Korean tab", async () => {
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 6; index += 1) {
       googleapisMock.queueGetValues([]);
     }
     const repository = await createRepository();
@@ -394,23 +516,169 @@ describe("GoogleSheetRepository", () => {
     await repository.writeViews([baseRow]);
 
     expect(googleapisMock.valuesGetCalls.map((call) => call.range)).toEqual([
-      "'동부트럭 (store-east) 매물'!A:U",
-      "'서부트럭 (store-west) 매물'!A:U",
-      "'동부트럭 (store-east)·서부트럭 (store-west) 공통 매물'!A:U",
-      "'스토어 내부 중복'!A:U",
+      "'동부트럭 (store-east) 매물'!A:E",
+      "'서부트럭 (store-west) 매물'!A:E",
+      "'동부트럭 (store-east) 내부 차량번호 중복'!A:E",
+      "'서부트럭 (store-west) 내부 차량번호 중복'!A:E",
+      "'동부트럭 (store-east)·서부트럭 (store-west) 차량번호 중복'!A:E",
       "'차량번호 추출 실패'!A:U",
     ]);
     expect(googleapisMock.updateCalls.map((call) => call.range)).toEqual([
-      "'동부트럭 (store-east) 매물'!A1:U2",
-      "'서부트럭 (store-west) 매물'!A1:U1",
-      "'동부트럭 (store-east)·서부트럭 (store-west) 공통 매물'!A1:U1",
-      "'스토어 내부 중복'!A1:U1",
-      "'차량번호 추출 실패'!A1:U1",
+      "'동부트럭 (store-east) 매물'!A1:E2",
+      "'서부트럭 (store-west) 매물'!A1:E2",
+      "'동부트럭 (store-east) 내부 차량번호 중복'!A1:E2",
+      "'서부트럭 (store-west) 내부 차량번호 중복'!A1:E2",
+      "'동부트럭 (store-east)·서부트럭 (store-west) 차량번호 중복'!A1:E2",
+      "'차량번호 추출 실패'!A1:U2",
     ]);
     expect(googleapisMock.updateCalls[0]?.requestBody?.values).toEqual([
-      RAW_DATA_HEADERS,
-      sheetProductRowToValues(baseRow),
+      OPERATOR_VIEW_HEADERS,
+      sheetProductRowToOperatorValues(baseRow),
     ]);
+  });
+
+  it("writes mutually exclusive store-only and cross-store duplicate tables", async () => {
+    for (let index = 0; index < 6; index += 1) {
+      googleapisMock.queueGetValues([]);
+    }
+    const storeAOnlyDuplicate: SheetProductRow = {
+      ...baseRow,
+      duplicateStatus: "duplicated_in_same_store",
+    };
+    const storeBOnlyDuplicate: SheetProductRow = {
+      ...baseRow,
+      storeKey: "B",
+      storeName: STORE_B_DISPLAY_NAME,
+      channelProductNo: "4001",
+      productUrl: "https://example.com/store-b/products/4001",
+      duplicateStatus: "duplicated_in_same_store",
+    };
+    const crossStoreDuplicate: SheetProductRow = {
+      ...baseRow,
+      channelProductNo: "2002",
+      productUrl: "https://example.com/store-a/products/2002",
+      duplicateStatus: "duplicated_both",
+    };
+    const repository = await createRepository();
+
+    await repository.writeViews([storeAOnlyDuplicate, storeBOnlyDuplicate, crossStoreDuplicate]);
+
+    expect(googleapisMock.updateCalls[2]?.requestBody?.values).toEqual([
+      OPERATOR_VIEW_HEADERS,
+      sheetProductRowToOperatorValues(storeAOnlyDuplicate),
+    ]);
+    expect(googleapisMock.updateCalls[3]?.requestBody?.values).toEqual([
+      OPERATOR_VIEW_HEADERS,
+      sheetProductRowToOperatorValues(storeBOnlyDuplicate),
+    ]);
+    expect(googleapisMock.updateCalls[4]?.requestBody?.values).toEqual([
+      OPERATOR_VIEW_HEADERS,
+      sheetProductRowToOperatorValues(crossStoreDuplicate),
+    ]);
+  });
+
+  it("creates a native Google Sheets table for a managed view without one", async () => {
+    for (let index = 0; index < 6; index += 1) {
+      googleapisMock.queueGetValues([]);
+    }
+    const repository = await createRepository();
+
+    await repository.writeViews([baseRow]);
+
+    const requests = googleapisMock.batchUpdateCalls.flatMap(
+      (call) => call.requestBody?.requests ?? [],
+    );
+    const addTableRequest = requests
+      .filter(hasAddTableRequest)
+      .find((request) => request.addTable.table.name === "managed_store_a_inventory");
+
+    expect(addTableRequest?.addTable.table).toMatchObject({
+      name: "managed_store_a_inventory",
+      range: {
+        sheetId: 1,
+        startRowIndex: 0,
+        endRowIndex: 2,
+        startColumnIndex: 0,
+        endColumnIndex: 5,
+      },
+    });
+  });
+
+  it("reuses and resizes an existing manually-created table", async () => {
+    googleapisMock.queueSpreadsheetSheets(localizedSheetsWithStoreATable());
+    for (let index = 0; index < 6; index += 1) {
+      googleapisMock.queueGetValues([]);
+    }
+    const repository = await createRepository();
+
+    await repository.writeViews([baseRow]);
+
+    const requests = googleapisMock.batchUpdateCalls.flatMap(
+      (call) => call.requestBody?.requests ?? [],
+    );
+    const updateTableRequest = requests
+      .filter(hasUpdateTableRequest)
+      .find((request) => request.updateTable.table.tableId === "manual-store-a-table");
+
+    expect(updateTableRequest?.updateTable).toMatchObject({
+      table: {
+        tableId: "manual-store-a-table",
+        range: {
+          sheetId: 1,
+          startRowIndex: 0,
+          endRowIndex: 2,
+          startColumnIndex: 0,
+          endColumnIndex: 5,
+        },
+      },
+      fields: "range,columnProperties,rowsProperties",
+    });
+    expect(googleapisMock.valuesGetCalls[0]?.range).toBe("'동부트럭 (store-east) 매물'!A:U");
+    expect(googleapisMock.updateCalls[0]?.range).toBe("'동부트럭 (store-east) 매물'!A1:U2");
+    expect(
+      googleapisMock.updateCalls[0]?.requestBody?.values?.every((row) => row.length === 21),
+    ).toBe(true);
+    expect(requests).toContainEqual({
+      updateDimensionProperties: {
+        range: {
+          sheetId: 1,
+          dimension: "COLUMNS",
+          startIndex: 5,
+          endIndex: 21,
+        },
+        properties: { hiddenByUser: true },
+        fields: "hiddenByUser",
+      },
+    });
+  });
+
+  it("preserves the manual duplicate table while splitting the legacy duplicate tab", async () => {
+    googleapisMock.queueSpreadsheetSheets(legacySheetsWithManualDuplicateTable());
+    googleapisMock.queueSpreadsheetSheets(localizedSheetsWithMigratedDuplicateTable());
+    for (let index = 0; index < 6; index += 1) {
+      googleapisMock.queueGetValues([]);
+    }
+    const repository = await createRepository();
+
+    await repository.writeViews([baseRow]);
+
+    const requests = googleapisMock.batchUpdateCalls.flatMap(
+      (call) => call.requestBody?.requests ?? [],
+    );
+    const updateTableRequest = requests
+      .filter(hasUpdateTableRequest)
+      .find((request) => request.updateTable.table.tableId === "manual-legacy-duplicates");
+
+    expect(updateTableRequest?.updateTable.table).toMatchObject({
+      tableId: "manual-legacy-duplicates",
+      range: {
+        sheetId: 3,
+        startRowIndex: 0,
+        endRowIndex: 2,
+        startColumnIndex: 0,
+        endColumnIndex: 5,
+      },
+    });
   });
 
   it("writes a Korean run-log header and appends localized mode values", async () => {
@@ -457,6 +725,54 @@ describe("GoogleSheetRepository", () => {
         },
       },
     ]);
+  });
+
+  it("extends the existing run-log table on subsequent appends", async () => {
+    googleapisMock.queueGetValues([]);
+    googleapisMock.queueGetValues([
+      RUN_LOG_HEADERS,
+      ["2026-07-09T00:00:00.000Z", "2026-07-09T00:01:00.000Z", "실제 연동", 5, 4, 1, 3, "첫 실행"],
+    ]);
+    const repository = await createRepository();
+    const firstRun: RunLogRow = {
+      runStartedAt: "2026-07-09T00:00:00.000Z",
+      runFinishedAt: "2026-07-09T00:01:00.000Z",
+      mode: "live",
+      totalProducts: 5,
+      successCount: 4,
+      failureCount: 1,
+      duplicateCount: 3,
+      message: "첫 실행",
+    };
+
+    await repository.appendRunLog(firstRun);
+    await repository.appendRunLog({
+      ...firstRun,
+      runStartedAt: "2026-07-09T00:05:00.000Z",
+      runFinishedAt: "2026-07-09T00:06:00.000Z",
+      message: "두 번째 실행",
+    });
+
+    const requests = googleapisMock.batchUpdateCalls.flatMap(
+      (call) => call.requestBody?.requests ?? [],
+    );
+    const updateTableRequest = requests
+      .filter(hasUpdateTableRequest)
+      .find((request) => request.updateTable.table.tableId === "101");
+
+    expect(updateTableRequest?.updateTable).toMatchObject({
+      table: {
+        tableId: "101",
+        range: {
+          sheetId: 8,
+          startRowIndex: 0,
+          endRowIndex: 3,
+          startColumnIndex: 0,
+          endColumnIndex: 8,
+        },
+      },
+      fields: "range,columnProperties,rowsProperties",
+    });
   });
 
   it("uses a credentials file when one is configured", async () => {
@@ -531,28 +847,165 @@ async function createRepository(
   });
 }
 
-function firstLegacyTitle(tab: SheetTabDefinition): string {
-  const title = tab.legacyTitles[0];
+function legacyTitleOrPlaceholder(
+  tab: SheetTabDefinition,
+  index: number,
+  position: "first" | "last",
+): string {
+  const title = position === "first" ? tab.legacyTitles[0] : tab.legacyTitles.at(-1);
 
-  if (title === undefined) {
-    throw new Error(`Expected a legacy title for ${tab.title}`);
-  }
-
-  return title;
-}
-
-function lastLegacyTitle(tab: SheetTabDefinition): string {
-  const title = tab.legacyTitles.at(-1);
-
-  if (title === undefined) {
-    throw new Error(`Expected a legacy title for ${tab.title}`);
-  }
-
-  return title;
+  return title ?? `Unmanaged ${String(index + 1)}`;
 }
 
 function blankRawDataRow(): string[] {
   return RAW_DATA_COLUMNS.map(() => "");
+}
+
+function localizedSheetsWithStoreATable(): NonNullable<SpreadsheetResponse["data"]["sheets"]> {
+  return MANAGED_TABS.definitions.map((definition, index) => ({
+    properties: {
+      sheetId: index + 1,
+      title: definition.title,
+      index,
+      gridProperties: { columnCount: index === 0 ? 21 : definition.columnCount },
+    },
+    ...(index === 0
+      ? {
+          tables: [
+            {
+              tableId: "manual-store-a-table",
+              name: "기존 수동 테이블",
+              range: {
+                sheetId: 1,
+                startRowIndex: 0,
+                endRowIndex: 10,
+                startColumnIndex: 0,
+                endColumnIndex: 21,
+              },
+            },
+          ],
+        }
+      : {}),
+  }));
+}
+
+function legacySheetsWithManualDuplicateTable(): NonNullable<
+  SpreadsheetResponse["data"]["sheets"]
+> {
+  return [
+    sheetMetadata(1, MANAGED_TABS.names.storeAView, 0, 21),
+    sheetMetadata(2, MANAGED_TABS.names.storeBView, 1, 21),
+    {
+      ...sheetMetadata(3, "스토어 내부 중복", 2, 21),
+      tables: [manualDuplicateTable(3)],
+    },
+    sheetMetadata(4, "동부트럭 (store-east)·서부트럭 (store-west) 공통 매물", 3, 21),
+    sheetMetadata(5, MANAGED_TABS.names.rawData, 4, 21),
+    sheetMetadata(6, MANAGED_TABS.names.extractionFailures, 5, 21),
+    sheetMetadata(7, MANAGED_TABS.names.runLog, 6, 8),
+  ];
+}
+
+function localizedSheetsWithMigratedDuplicateTable(): NonNullable<
+  SpreadsheetResponse["data"]["sheets"]
+> {
+  const sheetIds = [1, 2, 3, 8, 4, 5, 6, 7];
+
+  return MANAGED_TABS.definitions.map((definition, index) => ({
+    ...sheetMetadata(
+      sheetIds[index] ?? index + 1,
+      definition.title,
+      index,
+      index < 5 ? 21 : definition.columnCount,
+    ),
+    ...(index === 2 ? { tables: [manualDuplicateTable(3)] } : {}),
+  }));
+}
+
+function sheetMetadata(sheetId: number, title: string, index: number, columnCount: number) {
+  return {
+    properties: {
+      sheetId,
+      title,
+      index,
+      gridProperties: { columnCount },
+    },
+  };
+}
+
+function manualDuplicateTable(sheetId: number) {
+  return {
+    tableId: "manual-legacy-duplicates",
+    name: "기존 중복 테이블",
+    range: {
+      sheetId,
+      startRowIndex: 0,
+      endRowIndex: 61,
+      startColumnIndex: 0,
+      endColumnIndex: 21,
+    },
+  };
+}
+
+type SheetIndexUpdateRequest = {
+  updateSheetProperties: {
+    properties: {
+      sheetId: number;
+      index: number;
+      gridProperties: { frozenRowCount: number };
+    };
+  };
+};
+
+type AddTableRequestValue = {
+  addTable: {
+    table: Record<string, unknown>;
+  };
+};
+
+type UpdateTableRequestValue = {
+  updateTable: {
+    table: Record<string, unknown>;
+    fields: unknown;
+  };
+};
+
+function hasSheetIndexUpdate(value: unknown): value is SheetIndexUpdateRequest {
+  if (!isRecord(value) || !isRecord(value.updateSheetProperties)) {
+    return false;
+  }
+
+  const properties = value.updateSheetProperties.properties;
+
+  return isRecord(properties) && typeof properties.index === "number";
+}
+
+function hasAddTableRequest(value: unknown): value is AddTableRequestValue {
+  return isRecord(value) && isRecord(value.addTable) && isRecord(value.addTable.table);
+}
+
+function hasUpdateTableRequest(value: unknown): value is UpdateTableRequestValue {
+  return isRecord(value) && isRecord(value.updateTable) && isRecord(value.updateTable.table);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function hasManagedMetadataFields(call: SpreadsheetGetParams): boolean {
+  return (
+    call.spreadsheetId === "spreadsheet-id" &&
+    call.fields ===
+      "sheets(properties(sheetId,title,index,gridProperties(columnCount)),tables(tableId,name,range))"
+  );
+}
+
+function hasRenameSheetRequest(value: unknown): boolean {
+  if (!isRecord(value) || !isRecord(value.updateSheetProperties)) {
+    return false;
+  }
+
+  return value.updateSheetProperties.fields === "title";
 }
 
 function only<T>(values: readonly T[]): T {

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  A_STORE_DUPLICATES_TAB,
   ACROSS_STORES_DUPLICATES_TAB,
+  B_STORE_DUPLICATES_TAB,
   EXTRACTION_FAILURES_TAB,
-  SAME_STORE_DUPLICATES_TAB,
 } from "../../src/sheets/columns.js";
 import { InMemorySheetRepository } from "../../src/sheets/in-memory-repository.js";
 import type { SheetProductRow } from "../../src/sheets/types.js";
@@ -46,7 +47,36 @@ describe("InMemorySheetRepository", () => {
     expect(Object.values(repository.viewRows).every((rows) => rows.length <= 1)).toBe(true);
     expect(repository.viewRows[EXTRACTION_FAILURES_TAB]).toEqual([]);
     expect(repository.viewRows[ACROSS_STORES_DUPLICATES_TAB]).toEqual([]);
-    expect(repository.viewRows[SAME_STORE_DUPLICATES_TAB]).toEqual([]);
+    expect(repository.viewRows[A_STORE_DUPLICATES_TAB]).toEqual([]);
+    expect(repository.viewRows[B_STORE_DUPLICATES_TAB]).toEqual([]);
+  });
+
+  it("keeps store-only and cross-store duplicate views mutually exclusive", async () => {
+    const repository = new InMemorySheetRepository();
+    const storeADuplicate: SheetProductRow = {
+      ...baseRow,
+      duplicateStatus: "duplicated_in_same_store",
+    };
+    const storeBDuplicate: SheetProductRow = {
+      ...baseRow,
+      storeKey: "B",
+      storeName: "Store B",
+      channelProductNo: "4001",
+      productUrl: "https://example.com/store-b/products/4001",
+      duplicateStatus: "duplicated_in_same_store",
+    };
+    const crossStoreDuplicate: SheetProductRow = {
+      ...baseRow,
+      channelProductNo: "2002",
+      productUrl: "https://example.com/store-a/products/2002",
+      duplicateStatus: "duplicated_both",
+    };
+
+    await repository.writeViews([storeADuplicate, storeBDuplicate, crossStoreDuplicate]);
+
+    expect(repository.viewRows[A_STORE_DUPLICATES_TAB]).toEqual([storeADuplicate]);
+    expect(repository.viewRows[B_STORE_DUPLICATES_TAB]).toEqual([storeBDuplicate]);
+    expect(repository.viewRows[ACROSS_STORES_DUPLICATES_TAB]).toEqual([crossStoreDuplicate]);
   });
 
   it("clones rows at repository boundaries", async () => {

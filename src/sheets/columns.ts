@@ -3,19 +3,27 @@ import type { PlateExtractionStatus } from "../domain/plate/types.js";
 import type { SheetProductRow } from "./types.js";
 
 export type RawDataColumn = keyof SheetProductRow;
+export type OperatorViewColumn = Extract<
+  RawDataColumn,
+  "normalizedPlate" | "duplicateStatus" | "productUrl" | "storeName" | "displayStatus"
+>;
 
 export interface SheetTabDefinition {
   readonly title: string;
   readonly legacyTitles: readonly string[];
   readonly columnCount: number;
+  readonly headers: readonly string[];
+  readonly tableName: string;
+  readonly operatorFacing: boolean;
 }
 
 export interface SheetTabNames {
   readonly rawData: string;
   readonly storeAView: string;
   readonly storeBView: string;
+  readonly storeADuplicates: string;
+  readonly storeBDuplicates: string;
   readonly acrossStoresDuplicates: string;
-  readonly sameStoreDuplicates: string;
   readonly extractionFailures: string;
   readonly runLog: string;
 }
@@ -28,6 +36,8 @@ export interface ManagedSheetTabs {
 export const RAW_DATA_TAB = "원본 데이터";
 export const A_STORE_VIEW_TAB = "A스토어 매물";
 export const B_STORE_VIEW_TAB = "B스토어 매물";
+export const A_STORE_DUPLICATES_TAB = "A스토어 내부 차량번호 중복";
+export const B_STORE_DUPLICATES_TAB = "B스토어 내부 차량번호 중복";
 export const ACROSS_STORES_DUPLICATES_TAB = "양쪽 스토어 중복";
 export const SAME_STORE_DUPLICATES_TAB = "스토어 내부 중복";
 export const EXTRACTION_FAILURES_TAB = "차량번호 추출 실패";
@@ -57,6 +67,14 @@ export const RAW_DATA_COLUMNS: RawDataColumn[] = [
   "manualNote",
 ];
 
+export const OPERATOR_VIEW_COLUMNS: OperatorViewColumn[] = [
+  "normalizedPlate",
+  "duplicateStatus",
+  "productUrl",
+  "storeName",
+  "displayStatus",
+];
+
 const RAW_DATA_HEADER_BY_COLUMN: Record<RawDataColumn, string> = {
   storeKey: "내부 스토어 코드",
   storeName: "스토어 표시명",
@@ -81,6 +99,14 @@ const RAW_DATA_HEADER_BY_COLUMN: Record<RawDataColumn, string> = {
   manualNote: "관리자 메모",
 };
 
+const OPERATOR_VIEW_HEADER_BY_COLUMN: Record<OperatorViewColumn, string> = {
+  normalizedPlate: "차량번호",
+  duplicateStatus: RAW_DATA_HEADER_BY_COLUMN.duplicateStatus,
+  productUrl: RAW_DATA_HEADER_BY_COLUMN.productUrl,
+  storeName: RAW_DATA_HEADER_BY_COLUMN.storeName,
+  displayStatus: RAW_DATA_HEADER_BY_COLUMN.displayStatus,
+};
+
 const EXTRACTION_STATUS_LABELS: Record<PlateExtractionStatus, string> = {
   success: "성공",
   not_found: "찾지 못함",
@@ -96,6 +122,9 @@ const DUPLICATE_STATUS_LABELS: Record<DuplicateStatus, string> = {
 };
 
 export const RAW_DATA_HEADERS = RAW_DATA_COLUMNS.map((column) => RAW_DATA_HEADER_BY_COLUMN[column]);
+export const OPERATOR_VIEW_HEADERS = OPERATOR_VIEW_COLUMNS.map(
+  (column) => OPERATOR_VIEW_HEADER_BY_COLUMN[column],
+);
 
 export const RUN_LOG_HEADERS: string[] = [
   "실행 시작일시",
@@ -112,12 +141,20 @@ export function createManagedSheetTabs(
   storeADisplayName: string,
   storeBDisplayName: string,
 ): ManagedSheetTabs {
+  const previousAcrossStoresTitle = sheetTitle(
+    `${storeADisplayName}·${storeBDisplayName}`,
+    "공통 매물",
+  );
   const names: SheetTabNames = {
     rawData: RAW_DATA_TAB,
     storeAView: sheetTitle(storeADisplayName, "매물"),
     storeBView: sheetTitle(storeBDisplayName, "매물"),
-    acrossStoresDuplicates: sheetTitle(`${storeADisplayName}·${storeBDisplayName}`, "공통 매물"),
-    sameStoreDuplicates: SAME_STORE_DUPLICATES_TAB,
+    storeADuplicates: sheetTitle(storeADisplayName, "내부 차량번호 중복"),
+    storeBDuplicates: sheetTitle(storeBDisplayName, "내부 차량번호 중복"),
+    acrossStoresDuplicates: sheetTitle(
+      `${storeADisplayName}·${storeBDisplayName}`,
+      "차량번호 중복",
+    ),
     extractionFailures: EXTRACTION_FAILURES_TAB,
     runLog: RUN_LOG_TAB,
   };
@@ -126,39 +163,72 @@ export function createManagedSheetTabs(
     names,
     definitions: [
       {
-        title: names.rawData,
-        legacyTitles: ["RawData"],
-        columnCount: RAW_DATA_COLUMNS.length,
-      },
-      {
         title: names.storeAView,
         legacyTitles: [A_STORE_VIEW_TAB, "A_Store_View"],
-        columnCount: RAW_DATA_COLUMNS.length,
+        columnCount: OPERATOR_VIEW_COLUMNS.length,
+        headers: OPERATOR_VIEW_HEADERS,
+        tableName: "managed_store_a_inventory",
+        operatorFacing: true,
       },
       {
         title: names.storeBView,
         legacyTitles: [B_STORE_VIEW_TAB, "B_Store_View"],
-        columnCount: RAW_DATA_COLUMNS.length,
+        columnCount: OPERATOR_VIEW_COLUMNS.length,
+        headers: OPERATOR_VIEW_HEADERS,
+        tableName: "managed_store_b_inventory",
+        operatorFacing: true,
+      },
+      {
+        title: names.storeADuplicates,
+        legacyTitles: [SAME_STORE_DUPLICATES_TAB, "Same_Store_Duplicates"],
+        columnCount: OPERATOR_VIEW_COLUMNS.length,
+        headers: OPERATOR_VIEW_HEADERS,
+        tableName: "managed_store_a_duplicates",
+        operatorFacing: true,
+      },
+      {
+        title: names.storeBDuplicates,
+        legacyTitles: [],
+        columnCount: OPERATOR_VIEW_COLUMNS.length,
+        headers: OPERATOR_VIEW_HEADERS,
+        tableName: "managed_store_b_duplicates",
+        operatorFacing: true,
       },
       {
         title: names.acrossStoresDuplicates,
-        legacyTitles: [ACROSS_STORES_DUPLICATES_TAB, "Across_Stores_Duplicates"],
-        columnCount: RAW_DATA_COLUMNS.length,
+        legacyTitles: [
+          previousAcrossStoresTitle,
+          ACROSS_STORES_DUPLICATES_TAB,
+          "Across_Stores_Duplicates",
+        ],
+        columnCount: OPERATOR_VIEW_COLUMNS.length,
+        headers: OPERATOR_VIEW_HEADERS,
+        tableName: "managed_across_stores_duplicates",
+        operatorFacing: true,
       },
       {
-        title: names.sameStoreDuplicates,
-        legacyTitles: ["Same_Store_Duplicates"],
+        title: names.rawData,
+        legacyTitles: ["RawData"],
         columnCount: RAW_DATA_COLUMNS.length,
+        headers: RAW_DATA_HEADERS,
+        tableName: "managed_raw_data",
+        operatorFacing: false,
       },
       {
         title: names.extractionFailures,
         legacyTitles: ["Extraction_Failures"],
         columnCount: RAW_DATA_COLUMNS.length,
+        headers: RAW_DATA_HEADERS,
+        tableName: "managed_extraction_failures",
+        operatorFacing: false,
       },
       {
         title: names.runLog,
         legacyTitles: ["RunLog"],
         columnCount: RUN_LOG_HEADERS.length,
+        headers: RUN_LOG_HEADERS,
+        tableName: "managed_run_log",
+        operatorFacing: false,
       },
     ],
   };
@@ -212,6 +282,10 @@ export function parseDuplicateStatus(value: string): DuplicateStatus {
 
 export function sheetProductRowToValues(row: SheetProductRow): string[] {
   return RAW_DATA_COLUMNS.map((column) => valueForSheet(row, column));
+}
+
+export function sheetProductRowToOperatorValues(row: SheetProductRow): string[] {
+  return OPERATOR_VIEW_COLUMNS.map((column) => valueForSheet(row, column));
 }
 
 export function valuesToSheetProductRow(values: readonly string[]): SheetProductRow {
