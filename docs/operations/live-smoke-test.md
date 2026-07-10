@@ -17,10 +17,10 @@ Run this only on a fixed-IP staging or production server.
 3. Run `pnpm sync:once`.
 4. Confirm all eight managed Korean tabs exist and each managed range is a native Google Sheets table.
 5. Confirm the first five tabs are the two inventory views, two store-specific plate-duplicate views, and the cross-store plate-duplicate view.
-6. Confirm operator tables expose `차량번호`, `중복 상태`, `상품 URL`, `스토어 표시명`, and `전시 상태` in that order.
+6. Confirm operator tables expose `차량번호`, `중복 상태`, `상품 URL`, `스토어 표시명`, `전시 상태`, `상품 상태`, `상품명`, `최초 감지일시`, `마지막 동기화일시`, `관리자 메모`, `마지막 오류일시`, and `오류 메시지` in that order.
 7. Confirm `원본 데이터`, `차량번호 추출 실패`, and `실행 기록` follow the operator tabs.
 8. Confirm `차량번호 추출 실패` has image-only or no-text products.
-9. Edit `관리자 메모` in `원본 데이터`, rerun once, and confirm the note and `최초 감지일시` are preserved.
+9. Edit `관리자 메모` in `원본 데이터`, rerun once, and confirm the note and `최초 감지일시` are preserved and projected into the matching operator rows. Do not edit the derived operator copy because the next sync rewrites it.
 10. Confirm each store-specific duplicate tab and the cross-store duplicate tab match known normalized plate cases.
 11. Review logs for `GW.IP_NOT_ALLOWED`, `GW.AUTHN`, `GW.RATE_LIMIT`, and `GW.QUOTA_LIMIT`.
 
