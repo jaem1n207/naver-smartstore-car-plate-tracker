@@ -62,7 +62,7 @@ Operator tabs appear first:
 4. `<두 번째 스토어 표시명> 내부 차량번호 중복`
 5. `<두 스토어 표시명> 차량번호 중복`
 
-Each operator table exposes only `차량번호`, `중복 상태`, `상품 URL`, `스토어 표시명`, and `전시 상태`, in that order. Duplicate views are calculated from normalized vehicle plate numbers.
+Each operator table exposes the following decision-first columns in order: `차량번호`, `중복 상태`, `상품 URL`, `스토어 표시명`, `전시 상태`, `상품 상태`, `상품명`, `최초 감지일시`, `마지막 동기화일시`, `관리자 메모`, `마지막 오류일시`, and `오류 메시지`. Duplicate views are calculated from normalized vehicle plate numbers.
 The three duplicate views are mutually exclusive: each store-specific tab contains duplicates found only inside that store, while the cross-store tab contains every plate present in both stores.
 
 Developer tabs appear afterward:
@@ -72,3 +72,4 @@ Developer tabs appear afterward:
 8. `실행 기록`
 
 The internal `A` and `B` keys remain only in developer data for stable duplicate analysis. Naver's original product and display status codes remain unchanged so operators can compare them directly with the API source.
+Operator tabs are derived views and are rewritten on every sync. Enter or edit `관리자 메모` in `원본 데이터`; the next sync projects that canonical value into all matching operator tabs.
