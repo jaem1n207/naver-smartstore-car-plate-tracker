@@ -64,6 +64,7 @@ Operator tabs appear first:
 
 Each operator table exposes the following decision-first columns in order: `차량번호`, `중복 상태`, `상품 URL`, `스토어 표시명`, `전시 상태`, `상품 상태`, `상품명`, `최초 감지일시`, `마지막 동기화일시`, `관리자 메모`, `마지막 오류일시`, and `오류 메시지`. Duplicate views are calculated from normalized vehicle plate numbers.
 The three duplicate views are mutually exclusive: each store-specific tab contains duplicates found only inside that store, while the cross-store tab contains every plate present in both stores.
+Duplicate rows appear before unique rows in every operator table. Rows sharing a normalized plate stay adjacent and use the same high-contrast group fill and border; neighboring duplicate groups rotate colors. The first two columns remain frozen, the header uses white text on dark teal, and duplicate, display, and product status cells use stable code-specific colors.
 
 Developer tabs appear afterward:
 
@@ -73,3 +74,4 @@ Developer tabs appear afterward:
 
 The internal `A` and `B` keys remain only in developer data for stable duplicate analysis. Naver's original product and display status codes remain unchanged so operators can compare them directly with the API source.
 Operator tabs are derived views and are rewritten on every sync. Enter or edit `관리자 메모` in `원본 데이터`; the next sync projects that canonical value into all matching operator tabs.
+Operator ordering and formatting are also managed output. Manual row ordering, colors, or borders in those tabs can be replaced by the next sync.
