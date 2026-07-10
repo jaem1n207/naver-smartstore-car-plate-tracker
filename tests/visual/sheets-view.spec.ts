@@ -13,10 +13,23 @@ test.use({ launchOptions });
 test("sheet operator view remains readable", async ({ page }) => {
   const fixtureUrl = pathToFileURL(resolve("tests/visual/fixtures/sheets-view.html")).toString();
 
-  await page.setViewportSize({ width: 2440, height: 720 });
+  await page.setViewportSize({ width: 2490, height: 720 });
   await page.goto(fixtureUrl);
 
   await expect(page).toHaveScreenshot("sheets-view.png", {
+    animations: "disabled",
+    fullPage: true,
+  });
+});
+
+test("sheet operator colors remain readable against dark chrome", async ({ page }) => {
+  const fixtureUrl = pathToFileURL(resolve("tests/visual/fixtures/sheets-view.html")).toString();
+
+  await page.setViewportSize({ width: 2490, height: 720 });
+  await page.goto(fixtureUrl);
+  await page.evaluate("document.documentElement.classList.add('dark')");
+
+  await expect(page).toHaveScreenshot("sheets-view-dark.png", {
     animations: "disabled",
     fullPage: true,
   });
