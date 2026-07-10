@@ -18,7 +18,7 @@ export default [
   ...tseslint.configs.strictTypeChecked,
   eslintConfigPrettier,
   {
-    files: ["src/**/*.ts", "tests/**/*.ts", "playwright.config.ts"],
+    files: ["src/**/*.ts", "tests/**/*.ts", "playwright.config.ts", "vitest.config.ts"],
     languageOptions: {
       parserOptions: {
         projectService: true,
