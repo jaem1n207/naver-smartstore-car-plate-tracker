@@ -13,7 +13,7 @@ test.use({ launchOptions });
 test("sheet operator view remains readable", async ({ page }) => {
   const fixtureUrl = pathToFileURL(resolve("tests/visual/fixtures/sheets-view.html")).toString();
 
-  await page.setViewportSize({ width: 1200, height: 720 });
+  await page.setViewportSize({ width: 2440, height: 720 });
   await page.goto(fixtureUrl);
 
   await expect(page).toHaveScreenshot("sheets-view.png", {
