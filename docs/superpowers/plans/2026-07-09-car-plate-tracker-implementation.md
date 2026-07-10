@@ -1,6 +1,6 @@
 # Car Plate Tracker Implementation Plan
 
-> Historical implementation plan. The completed worker now creates Korean-named Google Sheets tabs automatically; current behavior is documented in `README.md` and `docs/architecture/system-overview.md`.
+> Historical implementation plan. The completed worker now creates Korean-named Google Sheets tabs automatically; current behavior is documented in `README.md` and `docs/architecture/system-overview.md`. Authentication examples below that use `SELLER` or `STORE_*_ACCOUNT_ID` are superseded: the confirmed `내스토어 애플리케이션` credentials use a form-urlencoded `type=SELF` token request without `account_id`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
