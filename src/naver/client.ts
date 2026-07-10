@@ -164,21 +164,21 @@ export class LiveNaverCommerceClient implements NaverCommerceClient {
     }
 
     const timestamp = Date.now();
+    const tokenBody = new URLSearchParams({
+      client_id: store.clientId,
+      timestamp: String(timestamp),
+      grant_type: "client_credentials",
+      client_secret_sign: createClientSecretSign({
+        clientId: store.clientId,
+        clientSecret: store.clientSecret,
+        timestamp,
+      }),
+      type: "SELF",
+    });
     const response = await this.fetchImpl(`${this.options.baseUrl}/v1/oauth2/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_id: store.clientId,
-        timestamp,
-        grant_type: "client_credentials",
-        client_secret_sign: createClientSecretSign({
-          clientId: store.clientId,
-          clientSecret: store.clientSecret,
-          timestamp,
-        }),
-        type: "SELLER",
-        account_id: store.accountId,
-      }),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: tokenBody.toString(),
     });
 
     if (!response.ok) {

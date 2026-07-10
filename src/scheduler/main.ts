@@ -77,8 +77,6 @@ function runtimeSecrets(env: ReturnType<typeof loadEnv>): string[] {
     env.storeBClientSecret,
     env.storeAClientId,
     env.storeBClientId,
-    env.storeAAccountId,
-    env.storeBAccountId,
     env.googleServiceAccountJsonBase64 ?? "",
   ];
 }

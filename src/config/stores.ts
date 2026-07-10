@@ -9,7 +9,6 @@ export interface StoreConfig {
   readonly storeBaseUrl: string;
   readonly clientId: string;
   readonly clientSecret: string;
-  readonly accountId: string;
 }
 
 export function loadStores(env: AppEnv): [StoreConfig, StoreConfig] {
@@ -21,7 +20,6 @@ export function loadStores(env: AppEnv): [StoreConfig, StoreConfig] {
       storeBaseUrl: env.raw.STORE_A_BASE_URL,
       clientId: env.raw.STORE_A_CLIENT_ID,
       clientSecret: env.raw.STORE_A_CLIENT_SECRET,
-      accountId: env.raw.STORE_A_ACCOUNT_ID,
     },
     {
       storeKey: "B",
@@ -30,7 +28,6 @@ export function loadStores(env: AppEnv): [StoreConfig, StoreConfig] {
       storeBaseUrl: env.raw.STORE_B_BASE_URL,
       clientId: env.raw.STORE_B_CLIENT_ID,
       clientSecret: env.raw.STORE_B_CLIENT_SECRET,
-      accountId: env.raw.STORE_B_ACCOUNT_ID,
     },
   ];
 }

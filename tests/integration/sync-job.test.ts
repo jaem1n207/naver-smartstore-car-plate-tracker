@@ -18,12 +18,10 @@ const env = loadEnv({
   STORE_A_BASE_URL: "https://example.com/store-a",
   STORE_A_CLIENT_ID: "store-a-client",
   STORE_A_CLIENT_SECRET: "store-a-secret",
-  STORE_A_ACCOUNT_ID: "store-a-account",
   STORE_B_NAME: "Store B",
   STORE_B_BASE_URL: "https://example.com/store-b",
   STORE_B_CLIENT_ID: "store-b-client",
   STORE_B_CLIENT_SECRET: "store-b-secret",
-  STORE_B_ACCOUNT_ID: "store-b-account",
   GOOGLE_SHEETS_SPREADSHEET_ID: "spreadsheet-id",
 });
 

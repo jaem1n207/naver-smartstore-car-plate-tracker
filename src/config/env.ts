@@ -18,12 +18,10 @@ const EnvSchema = z.object({
   STORE_A_BASE_URL: z.url(),
   STORE_A_CLIENT_ID: RequiredText,
   STORE_A_CLIENT_SECRET: RequiredText,
-  STORE_A_ACCOUNT_ID: RequiredText,
   STORE_B_NAME: RequiredText,
   STORE_B_BASE_URL: z.url(),
   STORE_B_CLIENT_ID: RequiredText,
   STORE_B_CLIENT_SECRET: RequiredText,
-  STORE_B_ACCOUNT_ID: RequiredText,
   GOOGLE_SHEETS_SPREADSHEET_ID: RequiredText,
   GOOGLE_APPLICATION_CREDENTIALS: OptionalText,
   GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: OptionalText,
@@ -43,12 +41,10 @@ export interface AppEnv {
   readonly storeABaseUrl: string;
   readonly storeAClientId: string;
   readonly storeAClientSecret: string;
-  readonly storeAAccountId: string;
   readonly storeBName: string;
   readonly storeBBaseUrl: string;
   readonly storeBClientId: string;
   readonly storeBClientSecret: string;
-  readonly storeBAccountId: string;
   readonly googleSheetsSpreadsheetId: string;
   readonly googleApplicationCredentials: string | undefined;
   readonly googleServiceAccountJsonBase64: string | undefined;
@@ -84,12 +80,10 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
     storeABaseUrl: raw.STORE_A_BASE_URL,
     storeAClientId: raw.STORE_A_CLIENT_ID,
     storeAClientSecret: raw.STORE_A_CLIENT_SECRET,
-    storeAAccountId: raw.STORE_A_ACCOUNT_ID,
     storeBName: raw.STORE_B_NAME,
     storeBBaseUrl: raw.STORE_B_BASE_URL,
     storeBClientId: raw.STORE_B_CLIENT_ID,
     storeBClientSecret: raw.STORE_B_CLIENT_SECRET,
-    storeBAccountId: raw.STORE_B_ACCOUNT_ID,
     googleSheetsSpreadsheetId: raw.GOOGLE_SHEETS_SPREADSHEET_ID,
     googleApplicationCredentials: raw.GOOGLE_APPLICATION_CREDENTIALS,
     googleServiceAccountJsonBase64: raw.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64,

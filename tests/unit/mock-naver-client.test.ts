@@ -13,7 +13,6 @@ const storeA: StoreConfig = {
   storeBaseUrl: "https://example.com/store-a",
   clientId: "store-a-client",
   clientSecret: "store-a-secret",
-  accountId: "store-a-account",
 };
 
 const storeB: StoreConfig = {
@@ -23,7 +22,6 @@ const storeB: StoreConfig = {
   storeBaseUrl: "https://example.com/store-b",
   clientId: "store-b-client",
   clientSecret: "store-b-secret",
-  accountId: "store-b-account",
 };
 
 describe("MockNaverCommerceClient", () => {

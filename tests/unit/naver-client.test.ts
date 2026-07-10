@@ -3,14 +3,15 @@ import { z } from "zod";
 import type { StoreConfig } from "../../src/config/stores.js";
 import { LiveNaverCommerceClient } from "../../src/naver/client.js";
 
-const TokenRequestBodySchema = z.object({
-  client_id: z.string(),
-  timestamp: z.number(),
-  grant_type: z.string(),
-  client_secret_sign: z.string(),
-  type: z.string(),
-  account_id: z.string(),
-});
+const TokenRequestBodySchema = z
+  .object({
+    client_id: z.string(),
+    timestamp: z.coerce.number(),
+    grant_type: z.string(),
+    client_secret_sign: z.string(),
+    type: z.string(),
+  })
+  .strict();
 
 const SearchRequestBodySchema = z.object({
   page: z.number(),
@@ -25,11 +26,10 @@ const store: StoreConfig = {
   storeBaseUrl: "https://example.com/store-a",
   clientId: "store-a-client",
   clientSecret: "$2a$04$abcdefghijklmnopqrstuu",
-  accountId: "store-a-account",
 };
 
 describe("LiveNaverCommerceClient", () => {
-  it("sends the Naver token request body without raw client secret leakage", async () => {
+  it("requests a SELF token as form data without raw client secret leakage", async () => {
     const queuedFetch = createQueuedFetch([
       tokenResponse("access-token"),
       searchResponse({ contents: [], last: true }),
@@ -42,16 +42,18 @@ describe("LiveNaverCommerceClient", () => {
     await client.searchProducts(store);
 
     const tokenCall = getCall(queuedFetch.calls, 0);
-    const tokenBody = TokenRequestBodySchema.parse(parseJsonBody(tokenCall));
+    const tokenBody = TokenRequestBodySchema.parse(parseFormBody(tokenCall));
     const rawTokenBody = stringifyBody(tokenCall);
     const decodedSignature = Buffer.from(tokenBody.client_secret_sign, "base64").toString("utf8");
 
     expect(tokenCall.url).toBe("https://api.example.com/v1/oauth2/token");
+    expect(new Headers(tokenCall.init?.headers).get("Content-Type")).toBe(
+      "application/x-www-form-urlencoded",
+    );
     expect(tokenBody).toMatchObject({
       client_id: "store-a-client",
       grant_type: "client_credentials",
-      type: "SELLER",
-      account_id: "store-a-account",
+      type: "SELF",
     });
     expect(decodedSignature).toContain("$2a$04$");
     expect(rawTokenBody).not.toContain(store.clientSecret);
@@ -326,6 +328,10 @@ function parseJsonBody(call: FetchCall): unknown {
   const body = stringifyBody(call);
   const parsed: unknown = JSON.parse(body);
   return parsed;
+}
+
+function parseFormBody(call: FetchCall): Record<string, string> {
+  return Object.fromEntries(new URLSearchParams(stringifyBody(call)));
 }
 
 function stringifyBody(call: FetchCall): string {
