@@ -34,20 +34,10 @@ describe("safeErrorLog", () => {
       runtimeSecretValues({
         STORE_A_CLIENT_ID: "client-a",
         STORE_A_CLIENT_SECRET: "secret-a",
-        STORE_A_ACCOUNT_ID: "account-a",
         STORE_B_CLIENT_ID: "client-b",
         STORE_B_CLIENT_SECRET: "secret-b",
-        STORE_B_ACCOUNT_ID: "account-b",
         GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: "google-json",
       }),
-    ).toEqual([
-      "client-a",
-      "secret-a",
-      "account-a",
-      "client-b",
-      "secret-b",
-      "account-b",
-      "google-json",
-    ]);
+    ).toEqual(["client-a", "secret-a", "client-b", "secret-b", "google-json"]);
   });
 });
