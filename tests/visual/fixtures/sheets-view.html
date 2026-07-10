@@ -32,49 +32,67 @@
       >
         <thead>
           <tr class="bg-slate-100 text-slate-700">
-            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">스토어</th>
-            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">상품번호</th>
-            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">상품명</th>
             <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">차량번호</th>
-            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">상태</th>
+            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">중복 상태</th>
+            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">상품 URL</th>
+            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">스토어 표시명</th>
+            <th class="border-b border-slate-200 px-3 py-2.5 font-semibold">전시 상태</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td class="border-b border-slate-100 px-3 py-2.5">동부트럭 (store-east)</td>
-            <td class="border-b border-slate-100 px-3 py-2.5">2001</td>
-            <td class="border-b border-slate-100 px-3 py-2.5">동부트럭 고소작업차</td>
-            <td class="border-b border-slate-100 px-3 py-2.5">123가4567</td>
+            <td class="border-b border-slate-100 px-3 py-2.5 font-bold">123가4567</td>
             <td class="border-b border-slate-100 px-3 py-2.5">
               <span
                 class="inline-block min-w-28 rounded-full bg-amber-100 px-2 py-1 text-center text-xs font-bold text-amber-800"
-                >양쪽 스토어 중복</span
+                >내부 및 양쪽 중복</span
               >
             </td>
+            <td class="border-b border-slate-100 px-3 py-2.5">
+              <a
+                class="font-semibold text-blue-700 underline"
+                href="https://example.com/products/2001"
+                >example.com/products/2001</a
+              >
+            </td>
+            <td class="border-b border-slate-100 px-3 py-2.5">동부트럭 (store-east)</td>
+            <td class="border-b border-slate-100 px-3 py-2.5">ON</td>
           </tr>
           <tr>
-            <td class="border-b border-slate-100 px-3 py-2.5">동부트럭 (store-east)</td>
-            <td class="border-b border-slate-100 px-3 py-2.5">2003</td>
-            <td class="border-b border-slate-100 px-3 py-2.5">동부트럭 이미지 전용 매물</td>
             <td class="border-b border-slate-100 px-3 py-2.5"></td>
             <td class="border-b border-slate-100 px-3 py-2.5">
               <span
-                class="inline-block min-w-28 rounded-full bg-red-100 px-2 py-1 text-center text-xs font-bold text-red-800"
-                >찾지 못함</span
+                class="inline-block min-w-28 rounded-full bg-slate-100 px-2 py-1 text-center text-xs font-bold text-slate-700"
+                >중복 없음</span
               >
             </td>
+            <td class="border-b border-slate-100 px-3 py-2.5">
+              <a
+                class="font-semibold text-blue-700 underline"
+                href="https://example.com/products/2003"
+                >example.com/products/2003</a
+              >
+            </td>
+            <td class="border-b border-slate-100 px-3 py-2.5">동부트럭 (store-east)</td>
+            <td class="border-b border-slate-100 px-3 py-2.5">SUSPENSION</td>
           </tr>
           <tr>
-            <td class="px-3 py-2.5">서부트럭 (store-west)</td>
-            <td class="px-3 py-2.5">4002</td>
-            <td class="px-3 py-2.5">서부트럭 단독 매물</td>
-            <td class="px-3 py-2.5">234나5678</td>
+            <td class="px-3 py-2.5 font-bold">234나5678</td>
             <td class="px-3 py-2.5">
               <span
                 class="inline-block min-w-28 rounded-full bg-emerald-100 px-2 py-1 text-center text-xs font-bold text-emerald-800"
                 >중복 없음</span
               >
             </td>
+            <td class="px-3 py-2.5">
+              <a
+                class="font-semibold text-blue-700 underline"
+                href="https://example.com/products/4002"
+                >example.com/products/4002</a
+              >
+            </td>
+            <td class="px-3 py-2.5">서부트럭 (store-west)</td>
+            <td class="px-3 py-2.5">ON</td>
           </tr>
         </tbody>
       </table>
