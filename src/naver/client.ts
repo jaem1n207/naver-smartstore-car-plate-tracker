@@ -8,6 +8,10 @@ interface NaverClientOptions {
   readonly baseUrl: string;
   readonly fetchImpl?: typeof fetch;
   readonly tokenCache?: TokenCache;
+  readonly maxRateLimitRetries?: number;
+  readonly now?: () => number;
+  readonly random?: () => number;
+  readonly sleep?: (milliseconds: number) => Promise<void>;
 }
 
 interface FetchJsonResult {
@@ -63,14 +67,27 @@ const GatewayErrorSchema = z.object({
   code: z.string().optional(),
 });
 
+const DEFAULT_MAX_RATE_LIMIT_RETRIES = 4;
+const INITIAL_RATE_LIMIT_BACKOFF_MS = 1_000;
+const MAX_RATE_LIMIT_JITTER_MS = 250;
+
 export class LiveNaverCommerceClient implements NaverCommerceClient {
   private readonly fetchImpl: typeof fetch;
   private readonly tokenCache: TokenCache;
-  private readonly detailLimit = pLimit(3);
+  private readonly detailLimit = pLimit(1);
+  private readonly maxRateLimitRetries: number;
+  private readonly now: () => number;
+  private readonly random: () => number;
+  private readonly sleep: (milliseconds: number) => Promise<void>;
+  private readonly nextRequestAtByResource = new Map<string, number>();
 
   constructor(private readonly options: NaverClientOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.tokenCache = options.tokenCache ?? new TokenCache();
+    this.maxRateLimitRetries = options.maxRateLimitRetries ?? DEFAULT_MAX_RATE_LIMIT_RETRIES;
+    this.now = options.now ?? Date.now;
+    this.random = options.random ?? Math.random;
+    this.sleep = options.sleep ?? sleep;
   }
 
   async searchProducts(store: StoreConfig): Promise<NaverProductSummary[]> {
@@ -200,10 +217,38 @@ export class LiveNaverCommerceClient implements NaverCommerceClient {
     accessToken: string,
     init: RequestInit,
   ): Promise<FetchJsonResult> {
+    return this.fetchJsonAttempt(path, accessToken, init, 0);
+  }
+
+  private async fetchJsonAttempt(
+    path: string,
+    accessToken: string,
+    init: RequestInit,
+    rateLimitRetryCount: number,
+  ): Promise<FetchJsonResult> {
+    await this.waitForRateLimitWindow(path);
     const response = await this.fetchImpl(`${this.options.baseUrl}${path}`, {
       ...init,
       headers: createJsonHeaders(accessToken, init.headers),
     });
+    this.observeRateLimitHeaders(path, response.headers);
+
+    if (response.status === 429) {
+      if (rateLimitRetryCount >= this.maxRateLimitRetries) {
+        throw new Error(
+          `Naver API rate limit exceeded after ${String(rateLimitRetryCount + 1)} attempts for ${path}`,
+        );
+      }
+
+      const retryDelay = rateLimitRetryDelay({
+        attempt: rateLimitRetryCount,
+        headers: response.headers,
+        now: this.now(),
+        random: this.random(),
+      });
+      await this.sleep(retryDelay);
+      return this.fetchJsonAttempt(path, accessToken, init, rateLimitRetryCount + 1);
+    }
 
     if (response.status === 401) {
       const body = GatewayErrorSchema.parse(await readJsonOrEmpty(response));
@@ -215,16 +260,104 @@ export class LiveNaverCommerceClient implements NaverCommerceClient {
       throw new Error(`Naver API request failed for ${path} with HTTP 401`);
     }
 
-    if (response.status === 429) {
-      throw new Error(`Naver API rate limit exceeded for ${path}`);
-    }
-
     if (!response.ok) {
       throw new Error(`Naver API request failed for ${path} with HTTP ${String(response.status)}`);
     }
 
     return { body: await readJson(response), authExpired: false };
   }
+
+  private async waitForRateLimitWindow(path: string): Promise<void> {
+    const resource = rateLimitResource(path);
+    const nextRequestAt = this.nextRequestAtByResource.get(resource);
+
+    if (nextRequestAt === undefined) {
+      return;
+    }
+
+    const waitMilliseconds = Math.max(0, nextRequestAt - this.now());
+
+    if (waitMilliseconds > 0) {
+      await this.sleep(waitMilliseconds);
+    }
+  }
+
+  private observeRateLimitHeaders(path: string, headers: Headers): void {
+    const replenishRate = positiveNumberHeader(headers, "GNCP-GW-RateLimit-Replenish-Rate");
+
+    if (replenishRate === undefined) {
+      return;
+    }
+
+    const resource = rateLimitResource(path);
+    const intervalMilliseconds = Math.ceil(1_000 / replenishRate);
+    this.nextRequestAtByResource.set(resource, this.now() + intervalMilliseconds);
+  }
+}
+
+interface RateLimitRetryDelayInput {
+  readonly attempt: number;
+  readonly headers: Headers;
+  readonly now: number;
+  readonly random: number;
+}
+
+function rateLimitRetryDelay(input: RateLimitRetryDelayInput): number {
+  const retryAfter = retryAfterMilliseconds(input.headers.get("Retry-After"), input.now);
+
+  if (retryAfter !== undefined) {
+    return retryAfter;
+  }
+
+  const exponentialBackoff = INITIAL_RATE_LIMIT_BACKOFF_MS * 2 ** input.attempt;
+  const jitter = Math.floor(input.random * MAX_RATE_LIMIT_JITTER_MS);
+  return exponentialBackoff + jitter;
+}
+
+function retryAfterMilliseconds(value: string | null, now: number): number | undefined {
+  if (value === null) {
+    return undefined;
+  }
+
+  const seconds = Number(value);
+
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.ceil(seconds * 1_000);
+  }
+
+  const retryAt = Date.parse(value);
+
+  if (Number.isNaN(retryAt)) {
+    return undefined;
+  }
+
+  return Math.max(0, retryAt - now);
+}
+
+function positiveNumberHeader(headers: Headers, name: string): number | undefined {
+  const parsed = Number(headers.get(name));
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+
+  return parsed;
+}
+
+function rateLimitResource(path: string): string {
+  const channelProductDetailPrefix = "/v2/products/channel-products/";
+
+  if (path.startsWith(channelProductDetailPrefix)) {
+    return `${channelProductDetailPrefix}:channelProductNo`;
+  }
+
+  return path;
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }
 
 function createJsonHeaders(accessToken: string, headers?: RequestInit["headers"]): Headers {

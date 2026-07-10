@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { StoreConfig } from "../../src/config/stores.js";
 import { LiveNaverCommerceClient } from "../../src/naver/client.js";
 
+type ResponseHeaders = ConstructorParameters<typeof Headers>[0];
+
 const TokenRequestBodySchema = z
   .object({
     client_id: z.string(),
@@ -246,16 +248,113 @@ describe("LiveNaverCommerceClient", () => {
     await expect(client.getProductDetail(store, "2001")).rejects.toThrow(/detailContent/);
   });
 
-  it("throws a rate-limit error for 429 responses", async () => {
-    const queuedFetch = createQueuedFetch([tokenResponse("access-token"), jsonResponse({}, 429)]);
+  it("retries a rate-limited product detail request with exponential backoff", async () => {
+    const sleeps: number[] = [];
+    const queuedFetch = createQueuedFetch([
+      tokenResponse("access-token"),
+      rateLimitedResponse(),
+      jsonResponse({
+        originProduct: {
+          originProductNo: 1001,
+          name: "Recovered product",
+          detailContent: "<p>차량번호 123가4567</p>",
+          statusType: "SALE",
+        },
+        smartstoreChannelProduct: {
+          channelProductNo: 2001,
+          channelProductName: "Recovered product",
+        },
+      }),
+    ]);
     const client = new LiveNaverCommerceClient({
       baseUrl: "https://api.example.com",
       fetchImpl: queuedFetch.fetchImpl,
+      sleep: (milliseconds) => {
+        sleeps.push(milliseconds);
+        return Promise.resolve();
+      },
+      random: () => 0,
+    });
+
+    await expect(client.getProductDetail(store, "2001")).resolves.toMatchObject({
+      channelProductNo: "2001",
+      productName: "Recovered product",
+    });
+    expect(sleeps).toEqual([1_000]);
+    expect(queuedFetch.calls).toHaveLength(3);
+  });
+
+  it("honors Retry-After on rate-limited requests", async () => {
+    const sleeps: number[] = [];
+    const queuedFetch = createQueuedFetch([
+      tokenResponse("access-token"),
+      rateLimitedResponse({ "Retry-After": "3" }),
+      searchResponse({ contents: [], last: true }),
+    ]);
+    const client = new LiveNaverCommerceClient({
+      baseUrl: "https://api.example.com",
+      fetchImpl: queuedFetch.fetchImpl,
+      sleep: (milliseconds) => {
+        sleeps.push(milliseconds);
+        return Promise.resolve();
+      },
+    });
+
+    await expect(client.searchProducts(store)).resolves.toEqual([]);
+    expect(sleeps).toEqual([3_000]);
+  });
+
+  it("fails after bounded rate-limit retries", async () => {
+    const sleeps: number[] = [];
+    const queuedFetch = createQueuedFetch([
+      tokenResponse("access-token"),
+      rateLimitedResponse(),
+      rateLimitedResponse(),
+      rateLimitedResponse(),
+      rateLimitedResponse(),
+      rateLimitedResponse(),
+    ]);
+    const client = new LiveNaverCommerceClient({
+      baseUrl: "https://api.example.com",
+      fetchImpl: queuedFetch.fetchImpl,
+      sleep: (milliseconds) => {
+        sleeps.push(milliseconds);
+        return Promise.resolve();
+      },
+      random: () => 0,
     });
 
     await expect(client.searchProducts(store)).rejects.toThrow(
-      "Naver API rate limit exceeded for /v1/products/search",
+      "Naver API rate limit exceeded after 5 attempts for /v1/products/search",
     );
+    expect(sleeps).toEqual([1_000, 2_000, 4_000, 8_000]);
+  });
+
+  it("paces repeated API calls from Naver rate-limit headers", async () => {
+    const sleeps: number[] = [];
+    const queuedFetch = createQueuedFetch([
+      tokenResponse("access-token"),
+      searchResponse(
+        { contents: [], totalPages: 2 },
+        {
+          "GNCP-GW-RateLimit-Replenish-Rate": "2",
+          "GNCP-GW-RateLimit-Remaining": "0",
+        },
+      ),
+      searchResponse({ contents: [], last: true }),
+    ]);
+    const client = new LiveNaverCommerceClient({
+      baseUrl: "https://api.example.com",
+      fetchImpl: queuedFetch.fetchImpl,
+      now: () => 10_000,
+      sleep: (milliseconds) => {
+        sleeps.push(milliseconds);
+        return Promise.resolve();
+      },
+    });
+
+    await expect(client.searchProducts(store)).resolves.toEqual([]);
+    expect(sleeps).toEqual([500]);
   });
 });
 
@@ -291,14 +390,21 @@ function tokenResponse(accessToken: string): Response {
   return jsonResponse({ access_token: accessToken, expires_in: 300 });
 }
 
-function searchResponse(body: unknown): Response {
-  return jsonResponse(body);
+function searchResponse(body: unknown, headers?: ResponseHeaders): Response {
+  return jsonResponse(body, 200, headers);
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
+function rateLimitedResponse(headers?: ResponseHeaders): Response {
+  return jsonResponse({ code: "GW.RATE_LIMIT" }, 429, headers);
+}
+
+function jsonResponse(body: unknown, status = 200, headers?: ResponseHeaders): Response {
+  const responseHeaders = new Headers(headers);
+  responseHeaders.set("Content-Type", "application/json");
+
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: responseHeaders,
   });
 }
 
