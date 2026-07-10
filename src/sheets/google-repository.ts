@@ -25,7 +25,9 @@ const RAW_DATA_END_COLUMN = columnNameForColumnCount(RAW_DATA_COLUMNS.length);
 const RUN_LOG_END_COLUMN = columnNameForColumnCount(RUN_LOG_HEADERS.length);
 const MAX_MANAGED_PRODUCT_COLUMNS = RAW_DATA_COLUMNS.length;
 const MIN_TABLE_ROW_COUNT = 2;
-const OPERATOR_COLUMN_WIDTHS: readonly number[] = [120, 160, 320, 220, 100];
+const OPERATOR_COLUMN_WIDTHS: readonly number[] = [
+  120, 160, 320, 220, 100, 110, 240, 170, 170, 220, 170, 320,
+];
 
 type ManagedTableSpec = {
   readonly name: string;

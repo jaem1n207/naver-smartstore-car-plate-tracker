@@ -230,7 +230,7 @@ const googleapisMock = vi.hoisted(() => {
               sheetId: 1,
               title: "동부트럭 (store-east) 매물",
               index: 0,
-              gridProperties: { columnCount: 5 },
+              gridProperties: { columnCount: 12 },
             },
           },
           {
@@ -238,7 +238,7 @@ const googleapisMock = vi.hoisted(() => {
               sheetId: 2,
               title: "서부트럭 (store-west) 매물",
               index: 1,
-              gridProperties: { columnCount: 5 },
+              gridProperties: { columnCount: 12 },
             },
           },
           {
@@ -246,7 +246,7 @@ const googleapisMock = vi.hoisted(() => {
               sheetId: 3,
               title: "동부트럭 (store-east) 내부 차량번호 중복",
               index: 2,
-              gridProperties: { columnCount: 5 },
+              gridProperties: { columnCount: 12 },
             },
           },
           {
@@ -254,7 +254,7 @@ const googleapisMock = vi.hoisted(() => {
               sheetId: 4,
               title: "서부트럭 (store-west) 내부 차량번호 중복",
               index: 3,
-              gridProperties: { columnCount: 5 },
+              gridProperties: { columnCount: 12 },
             },
           },
           {
@@ -262,7 +262,7 @@ const googleapisMock = vi.hoisted(() => {
               sheetId: 5,
               title: "동부트럭 (store-east)·서부트럭 (store-west) 차량번호 중복",
               index: 4,
-              gridProperties: { columnCount: 5 },
+              gridProperties: { columnCount: 12 },
             },
           },
           {
@@ -395,7 +395,7 @@ describe("GoogleSheetRepository", () => {
       addSheet: {
         properties: {
           title: MANAGED_TABS.names.storeBDuplicates,
-          gridProperties: { columnCount: 5, frozenRowCount: 1 },
+          gridProperties: { columnCount: 12, frozenRowCount: 1 },
         },
       },
     });
@@ -516,19 +516,19 @@ describe("GoogleSheetRepository", () => {
     await repository.writeViews([baseRow]);
 
     expect(googleapisMock.valuesGetCalls.map((call) => call.range)).toEqual([
-      "'동부트럭 (store-east) 매물'!A:E",
-      "'서부트럭 (store-west) 매물'!A:E",
-      "'동부트럭 (store-east) 내부 차량번호 중복'!A:E",
-      "'서부트럭 (store-west) 내부 차량번호 중복'!A:E",
-      "'동부트럭 (store-east)·서부트럭 (store-west) 차량번호 중복'!A:E",
+      "'동부트럭 (store-east) 매물'!A:L",
+      "'서부트럭 (store-west) 매물'!A:L",
+      "'동부트럭 (store-east) 내부 차량번호 중복'!A:L",
+      "'서부트럭 (store-west) 내부 차량번호 중복'!A:L",
+      "'동부트럭 (store-east)·서부트럭 (store-west) 차량번호 중복'!A:L",
       "'차량번호 추출 실패'!A:U",
     ]);
     expect(googleapisMock.updateCalls.map((call) => call.range)).toEqual([
-      "'동부트럭 (store-east) 매물'!A1:E2",
-      "'서부트럭 (store-west) 매물'!A1:E2",
-      "'동부트럭 (store-east) 내부 차량번호 중복'!A1:E2",
-      "'서부트럭 (store-west) 내부 차량번호 중복'!A1:E2",
-      "'동부트럭 (store-east)·서부트럭 (store-west) 차량번호 중복'!A1:E2",
+      "'동부트럭 (store-east) 매물'!A1:L2",
+      "'서부트럭 (store-west) 매물'!A1:L2",
+      "'동부트럭 (store-east) 내부 차량번호 중복'!A1:L2",
+      "'서부트럭 (store-west) 내부 차량번호 중복'!A1:L2",
+      "'동부트럭 (store-east)·서부트럭 (store-west) 차량번호 중복'!A1:L2",
       "'차량번호 추출 실패'!A1:U2",
     ]);
     expect(googleapisMock.updateCalls[0]?.requestBody?.values).toEqual([
@@ -599,7 +599,7 @@ describe("GoogleSheetRepository", () => {
         startRowIndex: 0,
         endRowIndex: 2,
         startColumnIndex: 0,
-        endColumnIndex: 5,
+        endColumnIndex: 12,
       },
     });
   });
@@ -628,7 +628,7 @@ describe("GoogleSheetRepository", () => {
           startRowIndex: 0,
           endRowIndex: 2,
           startColumnIndex: 0,
-          endColumnIndex: 5,
+          endColumnIndex: 12,
         },
       },
       fields: "range,columnProperties,rowsProperties",
@@ -643,7 +643,7 @@ describe("GoogleSheetRepository", () => {
         range: {
           sheetId: 1,
           dimension: "COLUMNS",
-          startIndex: 5,
+          startIndex: 12,
           endIndex: 21,
         },
         properties: { hiddenByUser: true },
@@ -676,7 +676,7 @@ describe("GoogleSheetRepository", () => {
         startRowIndex: 0,
         endRowIndex: 2,
         startColumnIndex: 0,
-        endColumnIndex: 5,
+        endColumnIndex: 12,
       },
     });
   });
