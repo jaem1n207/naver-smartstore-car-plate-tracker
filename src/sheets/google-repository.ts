@@ -1,4 +1,8 @@
-import { google, type sheets_v4 } from "googleapis";
+import {
+  auth as googleAuth,
+  sheets as createSheetsClient,
+  type sheets_v4,
+} from "googleapis/build/src/apis/sheets/index.js";
 import { z } from "zod";
 import type { DuplicateStatus } from "../domain/duplicates/types.js";
 import {
@@ -52,13 +56,13 @@ export class GoogleSheetRepository implements SheetRepository {
     this.tabNames = managedTabs.names;
 
     const credentials = decodeServiceAccountCredentials(options.serviceAccountJsonBase64);
-    const auth = new google.auth.GoogleAuth({
+    const auth = new googleAuth.GoogleAuth({
       scopes: [SPREADSHEETS_SCOPE],
       ...(options.credentialsFile === undefined ? {} : { keyFile: options.credentialsFile }),
       ...(credentials === undefined ? {} : { credentials }),
     });
 
-    this.sheets = google.sheets({ version: "v4", auth });
+    this.sheets = createSheetsClient({ version: "v4", auth });
   }
 
   async readRawData(): Promise<SheetProductRow[]> {

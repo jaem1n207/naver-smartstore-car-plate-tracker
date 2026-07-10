@@ -204,17 +204,16 @@ const googleapisMock = vi.hoisted(() => {
     spreadsheetGetCalls,
     updateCalls,
     valuesGetCalls,
-    google: {
-      auth: {
-        GoogleAuth,
-      },
-      sheets,
+    auth: {
+      GoogleAuth,
     },
+    sheets,
   };
 });
 
-vi.mock("googleapis", () => ({
-  google: googleapisMock.google,
+vi.mock("googleapis/build/src/apis/sheets/index.js", () => ({
+  auth: googleapisMock.auth,
+  sheets: googleapisMock.sheets,
 }));
 
 const STORE_A_DISPLAY_NAME = "동부트럭 (store-east)";
