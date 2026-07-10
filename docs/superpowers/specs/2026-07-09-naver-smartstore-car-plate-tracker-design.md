@@ -21,14 +21,14 @@ Confirmed from official Naver Commerce API docs:
 - Origin product detail: `GET https://api.commerce.naver.com/external/v2/products/origin-products/{originProductNo}`.
 - Detail HTML/text source: `originProduct.detailContent`.
 - Token endpoint: `POST https://api.commerce.naver.com/external/v1/oauth2/token`.
+- Both issued applications are `내스토어 애플리케이션`; request tokens with `type=SELF` and do not send `account_id`.
+- The token request body uses `application/x-www-form-urlencoded`.
 - Auth signature: bcrypt hash of `${clientId}_${timestamp}` with `clientSecret` as salt, then base64 encode.
 - Naver gateway may return `GW.IP_NOT_ALLOWED`, `GW.AUTHN`, `GW.RATE_LIMIT`, and `GW.QUOTA_LIMIT`.
 
 Still needs confirmation before live integration:
 
 - Exact API group permission name required for product search and product detail read access.
-- Whether each store should request token `type=SELF` or `type=SELLER`.
-- If `SELLER` is required, the exact `account_id` value for each store.
 - Whether each issued application has access to the expected Smartstore channel.
 - Whether the target Google Sheet can be shared with a service account.
 
@@ -169,7 +169,6 @@ Each store has a `StoreConfig`:
 - `storeBaseUrl`
 - `clientId`
 - `clientSecret`
-- `accountId`
 - `expectedChannelUrl`
 
 Secrets are read from environment variables or a server secret manager. The source code and committed docs must contain placeholders only.
@@ -178,7 +177,8 @@ Token strategy:
 
 - Generate timestamp immediately before token request.
 - Generate `client_secret_sign` using bcrypt and base64.
-- Request token with `grant_type=client_credentials`.
+- Request a form-urlencoded token with `grant_type=client_credentials` and `type=SELF`.
+- Do not request or send a seller UID or `account_id` for these `내스토어 애플리케이션` credentials.
 - Cache token per store until `expires_in - 60 seconds`.
 - On `401` with `GW.AUTHN`, refresh token once and retry.
 
@@ -287,12 +287,10 @@ Required runtime variables:
 - `STORE_A_BASE_URL`
 - `STORE_A_CLIENT_ID`
 - `STORE_A_CLIENT_SECRET`
-- `STORE_A_ACCOUNT_ID`
 - `STORE_B_NAME`
 - `STORE_B_BASE_URL`
 - `STORE_B_CLIENT_ID`
 - `STORE_B_CLIENT_SECRET`
-- `STORE_B_ACCOUNT_ID`
 - `GOOGLE_SHEETS_SPREADSHEET_ID`
 - `GOOGLE_APPLICATION_CREDENTIALS` or `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`
 
@@ -324,7 +322,7 @@ docs/
 ## 16. Implementation Order
 
 1. Rotate exposed Naver API secrets before live deployment.
-2. Confirm API group permissions and token `account_id` requirements.
+2. Confirm API group permissions for the two `내스토어 애플리케이션` credentials.
 3. Scaffold TypeScript project.
 4. Add environment validation and redaction utilities.
 5. Implement plate normalization and extraction with fixtures.
@@ -385,11 +383,9 @@ Server smoke tests:
 ## 19. Open Questions Before Implementation
 
 1. What exact API group permission must be enabled for product search and detail read APIs?
-2. Should token requests use `SELF` or `SELLER` for the issued applications?
-3. If `SELLER` is needed, what exact `account_id` should each store use?
-4. Can the target spreadsheet be shared with a Google service account?
-5. Should deleted Naver products with status `DELETE` ever be archived into a separate view, or always ignored?
-6. How should ambiguous extraction be handled operationally: failure-only view, or manual override column?
-7. Is a five-minute sync interval enough for operations, or is one minute required after rate-limit validation?
-8. Should a product with no plate stay in `원본 데이터` forever, or disappear if it later becomes deleted?
-9. Should view sheet names be Korean for operators, English for code stability, or both with a mapping table?
+2. Can the target spreadsheet be shared with a Google service account?
+3. Should deleted Naver products with status `DELETE` ever be archived into a separate view, or always ignored?
+4. How should ambiguous extraction be handled operationally: failure-only view, or manual override column?
+5. Is a five-minute sync interval enough for operations, or is one minute required after rate-limit validation?
+6. Should a product with no plate stay in `원본 데이터` forever, or disappear if it later becomes deleted?
+7. Should view sheet names be Korean for operators, English for code stability, or both with a mapping table?
