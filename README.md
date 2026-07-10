@@ -52,14 +52,23 @@ All registered non-deleted products are included regardless of sale or display s
 
 ## Google Sheets Tabs
 
-The worker creates missing tabs automatically, freezes the first row, and writes Korean headers and status labels. Store-facing tab names are generated from each configured store name and Smartstore URL slug, such as `동부트럭 (store-east) 매물`. Existing generic Korean or legacy English tabs are renamed in place when the configured tab does not already exist.
+The worker creates missing tabs automatically, moves operator tabs before developer tabs, freezes headers, and maintains each managed range as a native Google Sheets table. Existing tables are reused and resized rather than duplicated.
 
-- `원본 데이터`
-- `<첫 번째 스토어 표시명> 매물`
-- `<두 번째 스토어 표시명> 매물`
-- `<두 스토어 표시명> 공통 매물`
-- `스토어 내부 중복`
-- `차량번호 추출 실패`
-- `실행 기록`
+Operator tabs appear first:
 
-The internal `A` and `B` keys remain only for stable duplicate analysis. Rows expose `스토어 표시명`, and Naver's original product and display status codes remain unchanged so operators can compare them directly with the API source.
+1. `<첫 번째 스토어 표시명> 매물`
+2. `<두 번째 스토어 표시명> 매물`
+3. `<첫 번째 스토어 표시명> 내부 차량번호 중복`
+4. `<두 번째 스토어 표시명> 내부 차량번호 중복`
+5. `<두 스토어 표시명> 차량번호 중복`
+
+Each operator table exposes only `차량번호`, `중복 상태`, `상품 URL`, `스토어 표시명`, and `전시 상태`, in that order. Duplicate views are calculated from normalized vehicle plate numbers.
+The three duplicate views are mutually exclusive: each store-specific tab contains duplicates found only inside that store, while the cross-store tab contains every plate present in both stores.
+
+Developer tabs appear afterward:
+
+6. `원본 데이터`
+7. `차량번호 추출 실패`
+8. `실행 기록`
+
+The internal `A` and `B` keys remain only in developer data for stable duplicate analysis. Naver's original product and display status codes remain unchanged so operators can compare them directly with the API source.
