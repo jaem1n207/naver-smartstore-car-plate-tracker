@@ -9,6 +9,8 @@ pnpm install --frozen-lockfile
 pnpm build
 ```
 
+The production build compiles `src/` only through `tsconfig.build.json` and caps the TypeScript V8 heap at 768 MB. Keep the documented 2 GB swap active on a 1 GB Free Tier VM while building. Full source and test type checking remains available through `pnpm typecheck` on development and CI machines.
+
 ## Environment
 
 Create a server-only `.env` file outside git. Include the variables from `.env.example`. Store the Google service account JSON outside the repository and set `GOOGLE_APPLICATION_CREDENTIALS` to its absolute path.
