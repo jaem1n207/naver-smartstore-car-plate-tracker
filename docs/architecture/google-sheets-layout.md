@@ -40,19 +40,22 @@ Operator tables are sorted for duplicate-resolution work:
 3. Plate groups are ordered by plate, then store display name and channel product number.
 4. Rows without an extracted plate appear last.
 
-Every duplicate plate group receives one shared light background and a matching medium top and bottom border. Four accessible group palettes rotate between neighboring groups, so one plate remains visually connected without blending into the next plate. This grouping applies to both inventory tabs and all duplicate-only tabs.
+Every duplicate plate group receives one shared light amber background only in the `차량번호` and `중복 상태` columns, plus matching medium top and bottom borders around those two decision cells. The rest of each row keeps the neutral table banding. This grouping applies to both inventory tabs and all duplicate-only tabs.
 
-The header uses white text on dark teal (`#174C3C`) and the first two columns stay frozen during horizontal scrolling. Status cells use stable colors:
+The header uses white text on dark teal (`#174C3C`) and the first two columns stay frozen during horizontal scrolling. Color is reserved for duplicates and exception states; normal `ON` and `SALE` cells inherit the neutral table background. Exception cells use a small semantic palette:
 
-| Field     | Codes and color families                                                                                                                    |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| 중복 상태 | `중복 없음` gray, `스토어 내부 중복` yellow, `양쪽 스토어 중복` blue, `내부 및 양쪽 중복` red                                               |
-| 전시 상태 | `ON` green, `WAIT` blue, `SUSPENSION` orange                                                                                                |
-| 상품 상태 | `SALE` green, `WAIT` blue, `OUTOFSTOCK` amber, `UNADMISSION` violet, `REJECTION` red, `SUSPENSION` orange, `CLOSE` gray, `PROHIBITION` pink |
+| Meaning | Codes and color families                                               |
+| ------- | ---------------------------------------------------------------------- |
+| 중복    | Every non-unique duplicate status uses one light amber treatment       |
+| 정보    | `WAIT` uses blue                                                       |
+| 주의    | `SUSPENSION`, `OUTOFSTOCK` use amber                                   |
+| 차단    | `UNADMISSION`, `REJECTION`, `PROHIBITION` use red                      |
+| 비활성  | `CLOSE`, `DELETE`, and unknown non-empty status codes use neutral gray |
+| 정상    | `ON`, `SALE`, and `중복 없음` receive no direct fill                   |
 
 Every managed foreground/background pair has at least a 4.5:1 contrast ratio. The fixed cell colors remain legible against light or dark surrounding application chrome. Unknown non-empty status codes use a neutral gray fallback instead of remaining unstyled.
 
-Ordering, group fills, status colors, borders, header style, and frozen columns are managed output and are reapplied on every sync. Operators should not rely on manual sorting or formatting in derived tabs.
+Ordering, duplicate key fills, exception colors, borders, header style, and frozen columns are managed output and are reapplied on every sync. Operators should not rely on manual sorting or formatting in derived tabs.
 
 ## Developer Tabs
 
