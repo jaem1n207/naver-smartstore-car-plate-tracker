@@ -21,7 +21,7 @@ import {
 import type { SheetTabDefinition, SheetTabNames } from "./columns.js";
 import {
   displayStatusStyle,
-  DUPLICATE_GROUP_STYLES,
+  DUPLICATE_GROUP_STYLE,
   duplicateStatusStyle,
   findDuplicateGroups,
   productStatusStyle,
@@ -718,15 +718,9 @@ function createOperatorFormattingRequests(
   });
 
   for (const group of duplicateGroups) {
-    const groupStyle = DUPLICATE_GROUP_STYLES[group.styleIndex];
-
-    if (groupStyle === undefined) {
-      continue;
-    }
-
     const border = {
       style: "SOLID_MEDIUM",
-      colorStyle: colorStyleFromHex(groupStyle.borderHex),
+      colorStyle: colorStyleFromHex(DUPLICATE_GROUP_STYLE.borderHex),
     };
     requests.push({
       updateBorders: {
@@ -735,7 +729,7 @@ function createOperatorFormattingRequests(
           startRowIndex: group.startIndex + 1,
           endRowIndex: group.endIndex + 1,
           startColumnIndex: 0,
-          endColumnIndex: OPERATOR_VIEW_COLUMNS.length,
+          endColumnIndex: 2,
         },
         top: border,
         bottom: border,
@@ -752,14 +746,8 @@ function duplicateGroupStylesByRowIndex(
   const stylesByRowIndex = new Map<number, DuplicateGroupStyle>();
 
   for (const group of groups) {
-    const style = DUPLICATE_GROUP_STYLES[group.styleIndex];
-
-    if (style === undefined) {
-      continue;
-    }
-
     for (let index = group.startIndex; index < group.endIndex; index += 1) {
-      stylesByRowIndex.set(index, style);
+      stylesByRowIndex.set(index, DUPLICATE_GROUP_STYLE);
     }
   }
 
@@ -772,16 +760,21 @@ function operatorCellFormat(
   groupStyle: DuplicateGroupStyle | undefined,
 ): sheets_v4.Schema$CellFormat {
   const statusStyle = statusStyleForColumn(row, column);
-  const backgroundHex = statusStyle?.backgroundHex ?? groupStyle?.backgroundHex;
+  const duplicateKeyStyle =
+    groupStyle !== undefined && (column === "normalizedPlate" || column === "duplicateStatus")
+      ? groupStyle
+      : undefined;
+  const backgroundHex = statusStyle?.backgroundHex ?? duplicateKeyStyle?.backgroundHex;
   const foregroundHex =
-    statusStyle?.foregroundHex ?? (column === "productUrl" ? undefined : groupStyle?.foregroundHex);
+    statusStyle?.foregroundHex ??
+    (column === "productUrl" ? undefined : duplicateKeyStyle?.foregroundHex);
 
   return {
     ...(backgroundHex === undefined
       ? {}
       : { backgroundColorStyle: colorStyleFromHex(backgroundHex) }),
     textFormat: {
-      bold: statusStyle !== undefined || (column === "normalizedPlate" && groupStyle !== undefined),
+      bold: statusStyle !== undefined || duplicateKeyStyle !== undefined,
       ...(foregroundHex === undefined
         ? {}
         : { foregroundColorStyle: colorStyleFromHex(foregroundHex) }),

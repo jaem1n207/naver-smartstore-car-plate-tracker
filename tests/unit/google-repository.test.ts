@@ -455,7 +455,7 @@ describe("GoogleSheetRepository", () => {
     );
   });
 
-  it("applies high-contrast headers, status colors, and duplicate group borders", async () => {
+  it("applies high-contrast headers, exception colors, and compact duplicate grouping", async () => {
     for (let index = 0; index < 6; index += 1) {
       googleapisMock.queueGetValues([]);
     }
@@ -501,7 +501,10 @@ describe("GoogleSheetRepository", () => {
       .filter(hasUpdateCellsRequest)
       .find((request) => request.updateCells.start.sheetId === 1);
     const formattedCells = updateCellsRequest?.updateCells.rows[0]?.values ?? [];
-    const statusBackgrounds = [1, 4, 5].map(
+    const duplicateBackgrounds = [0, 1].map(
+      (columnIndex) => formattedCells[columnIndex]?.userEnteredFormat?.backgroundColorStyle,
+    );
+    const exceptionBackgrounds = [4, 5].map(
       (columnIndex) => formattedCells[columnIndex]?.userEnteredFormat?.backgroundColorStyle,
     );
 
@@ -511,7 +514,9 @@ describe("GoogleSheetRepository", () => {
       columnIndex: 0,
     });
     expect(formattedCells[2]?.userEnteredFormat?.textFormat?.foregroundColorStyle).toBeUndefined();
-    expect(new Set(statusBackgrounds.map((value) => JSON.stringify(value))).size).toBe(3);
+    expect(duplicateBackgrounds).toEqual([rgbStyle("#FFF3C4"), rgbStyle("#FFF3C4")]);
+    expect(exceptionBackgrounds).toEqual([rgbStyle("#FCE8D5"), rgbStyle("#FCE8D5")]);
+    expect(formattedCells[3]?.userEnteredFormat).toEqual({ textFormat: { bold: false } });
     expect(requests).toContainEqual({
       updateBorders: {
         range: {
@@ -519,15 +524,15 @@ describe("GoogleSheetRepository", () => {
           startRowIndex: 1,
           endRowIndex: 2,
           startColumnIndex: 0,
-          endColumnIndex: 12,
+          endColumnIndex: 2,
         },
         top: {
           style: "SOLID_MEDIUM",
-          colorStyle: rgbStyle("#9A6700"),
+          colorStyle: rgbStyle("#B7791F"),
         },
         bottom: {
           style: "SOLID_MEDIUM",
-          colorStyle: rgbStyle("#9A6700"),
+          colorStyle: rgbStyle("#B7791F"),
         },
       },
     });
@@ -543,6 +548,8 @@ describe("GoogleSheetRepository", () => {
       {
         ...baseRow,
         duplicateStatus: "duplicated_in_same_store",
+        displayStatus: "SUSPENSION",
+        productStatus: "OUTOFSTOCK",
       },
     ]);
     await repository.writeViews([baseRow]);
@@ -551,10 +558,12 @@ describe("GoogleSheetRepository", () => {
       .flatMap((call) => call.requestBody?.requests ?? [])
       .filter(hasUpdateCellsRequest)
       .filter((request) => request.updateCells.start.sheetId === 1);
-    const latestPlateFormat =
-      sheetOneUpdates.at(-1)?.updateCells.rows[0]?.values?.[0]?.userEnteredFormat;
+    const latestFormats = sheetOneUpdates.at(-1)?.updateCells.rows[0]?.values ?? [];
 
-    expect(latestPlateFormat).toEqual({ textFormat: { bold: false } });
+    expect(latestFormats[0]?.userEnteredFormat).toEqual({ textFormat: { bold: false } });
+    expect(latestFormats[1]?.userEnteredFormat).toEqual({ textFormat: { bold: false } });
+    expect(latestFormats[4]?.userEnteredFormat).toEqual({ textFormat: { bold: false } });
+    expect(latestFormats[5]?.userEnteredFormat).toEqual({ textFormat: { bold: false } });
   });
 
   it("reads raw data from the Korean raw tab and parses sparse trailing cells", async () => {
