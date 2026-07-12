@@ -14,7 +14,6 @@ export interface DuplicateGroup {
   readonly plate: string;
   readonly startIndex: number;
   readonly endIndex: number;
-  readonly styleIndex: number;
 }
 
 export const SHEET_HEADER_STYLE: OperatorCellStyle = {
@@ -23,40 +22,50 @@ export const SHEET_HEADER_STYLE: OperatorCellStyle = {
 };
 
 export const UNKNOWN_STATUS_STYLE: OperatorCellStyle = {
-  backgroundHex: "#E5E7EB",
-  foregroundHex: "#111827",
+  backgroundHex: "#E9ECEF",
+  foregroundHex: "#343A40",
 };
 
-export const DUPLICATE_GROUP_STYLES: readonly DuplicateGroupStyle[] = [
-  { backgroundHex: "#FFF4CC", foregroundHex: "#3A2A00", borderHex: "#9A6700" },
-  { backgroundHex: "#E6F0FF", foregroundHex: "#102A43", borderHex: "#2563EB" },
-  { backgroundHex: "#FDE8F0", foregroundHex: "#4A1530", borderHex: "#BE185D" },
-  { backgroundHex: "#DFF7EE", foregroundHex: "#12372A", borderHex: "#0F766E" },
-];
+export const DUPLICATE_GROUP_STYLE: DuplicateGroupStyle = {
+  backgroundHex: "#FFF3C4",
+  foregroundHex: "#5B3A00",
+  borderHex: "#B7791F",
+};
 
-export const DUPLICATE_STATUS_STYLES = {
-  unique: { backgroundHex: "#E5E7EB", foregroundHex: "#111827" },
-  duplicated_in_same_store: { backgroundHex: "#FEF08A", foregroundHex: "#713F12" },
-  duplicated_across_stores: { backgroundHex: "#BFDBFE", foregroundHex: "#1E3A8A" },
-  duplicated_both: { backgroundHex: "#FECACA", foregroundHex: "#7F1D1D" },
-} satisfies Readonly<Record<DuplicateStatus, OperatorCellStyle>>;
+const INFORMATION_STATUS_STYLE: OperatorCellStyle = {
+  backgroundHex: "#E8F0FE",
+  foregroundHex: "#174EA6",
+};
+
+const WARNING_STATUS_STYLE: OperatorCellStyle = {
+  backgroundHex: "#FCE8D5",
+  foregroundHex: "#8A3B12",
+};
+
+const BLOCKED_STATUS_STYLE: OperatorCellStyle = {
+  backgroundHex: "#FCE8E6",
+  foregroundHex: "#8A1C1C",
+};
+
+const INACTIVE_STATUS_STYLE: OperatorCellStyle = {
+  backgroundHex: "#E9ECEF",
+  foregroundHex: "#343A40",
+};
 
 export const DISPLAY_STATUS_STYLES: Readonly<Record<string, OperatorCellStyle>> = {
-  ON: { backgroundHex: "#BBF7D0", foregroundHex: "#14532D" },
-  WAIT: { backgroundHex: "#BFDBFE", foregroundHex: "#1E3A8A" },
-  SUSPENSION: { backgroundHex: "#FED7AA", foregroundHex: "#7C2D12" },
+  WAIT: INFORMATION_STATUS_STYLE,
+  SUSPENSION: WARNING_STATUS_STYLE,
 };
 
 export const PRODUCT_STATUS_STYLES: Readonly<Record<string, OperatorCellStyle>> = {
-  SALE: { backgroundHex: "#DCFCE7", foregroundHex: "#14532D" },
-  WAIT: { backgroundHex: "#DBEAFE", foregroundHex: "#1E3A8A" },
-  OUTOFSTOCK: { backgroundHex: "#FEF3C7", foregroundHex: "#78350F" },
-  UNADMISSION: { backgroundHex: "#EDE9FE", foregroundHex: "#4C1D95" },
-  REJECTION: { backgroundHex: "#FEE2E2", foregroundHex: "#7F1D1D" },
-  SUSPENSION: { backgroundHex: "#FFEDD5", foregroundHex: "#7C2D12" },
-  CLOSE: { backgroundHex: "#E5E7EB", foregroundHex: "#111827" },
-  PROHIBITION: { backgroundHex: "#FCE7F3", foregroundHex: "#831843" },
-  DELETE: { backgroundHex: "#D1D5DB", foregroundHex: "#111827" },
+  WAIT: INFORMATION_STATUS_STYLE,
+  OUTOFSTOCK: WARNING_STATUS_STYLE,
+  UNADMISSION: BLOCKED_STATUS_STYLE,
+  REJECTION: BLOCKED_STATUS_STYLE,
+  SUSPENSION: WARNING_STATUS_STYLE,
+  CLOSE: INACTIVE_STATUS_STYLE,
+  PROHIBITION: BLOCKED_STATUS_STYLE,
+  DELETE: INACTIVE_STATUS_STYLE,
 };
 
 const DUPLICATE_STATUS_ORDER: Readonly<Record<DuplicateStatus, number>> = {
@@ -92,22 +101,29 @@ export function findDuplicateGroups(rows: readonly SheetProductRow[]): Duplicate
       plate,
       startIndex: index,
       endIndex: index + 1,
-      styleIndex: groups.length % DUPLICATE_GROUP_STYLES.length,
     });
   }
 
   return groups;
 }
 
-export function duplicateStatusStyle(status: DuplicateStatus): OperatorCellStyle {
-  return DUPLICATE_STATUS_STYLES[status];
+export function duplicateStatusStyle(status: DuplicateStatus): OperatorCellStyle | undefined {
+  return status === "unique" ? undefined : DUPLICATE_GROUP_STYLE;
 }
 
-export function displayStatusStyle(status: string): OperatorCellStyle {
+export function displayStatusStyle(status: string): OperatorCellStyle | undefined {
+  if (status === "ON") {
+    return undefined;
+  }
+
   return DISPLAY_STATUS_STYLES[status] ?? UNKNOWN_STATUS_STYLE;
 }
 
-export function productStatusStyle(status: string): OperatorCellStyle {
+export function productStatusStyle(status: string): OperatorCellStyle | undefined {
+  if (status === "SALE") {
+    return undefined;
+  }
+
   return PRODUCT_STATUS_STYLES[status] ?? UNKNOWN_STATUS_STYLE;
 }
 

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   DISPLAY_STATUS_STYLES,
-  DUPLICATE_GROUP_STYLES,
-  DUPLICATE_STATUS_STYLES,
+  DUPLICATE_GROUP_STYLE,
+  duplicateStatusStyle,
+  displayStatusStyle,
   findDuplicateGroups,
+  productStatusStyle,
   PRODUCT_STATUS_STYLES,
   SHEET_HEADER_STYLE,
   sortOperatorRows,
@@ -55,27 +57,32 @@ describe("operator sheet presentation", () => {
       "5",
     ]);
     expect(findDuplicateGroups(sortedRows)).toEqual([
-      { plate: "111가1111", startIndex: 0, endIndex: 2, styleIndex: 0 },
-      { plate: "222나2222", startIndex: 2, endIndex: 3, styleIndex: 1 },
+      { plate: "111가1111", startIndex: 0, endIndex: 2 },
+      { plate: "222나2222", startIndex: 2, endIndex: 3 },
     ]);
   });
 
-  it("assigns a stable unique color to every documented status option", () => {
-    expect(uniqueBackgroundCount(PRODUCT_STATUS_STYLES)).toBe(9);
-    expect(uniqueBackgroundCount(DISPLAY_STATUS_STYLES)).toBe(3);
-    expect(uniqueBackgroundCount(DUPLICATE_STATUS_STYLES)).toBe(4);
-    expect(PRODUCT_STATUS_STYLES.SALE).not.toEqual(PRODUCT_STATUS_STYLES.SUSPENSION);
-    expect(DISPLAY_STATUS_STYLES.ON).not.toEqual(DISPLAY_STATUS_STYLES.WAIT);
+  it("uses color for duplicate and exception states while leaving normal states neutral", () => {
+    expect(duplicateStatusStyle("unique")).toBeUndefined();
+    expect(duplicateStatusStyle("duplicated_in_same_store")).toBe(DUPLICATE_GROUP_STYLE);
+    expect(duplicateStatusStyle("duplicated_across_stores")).toBe(DUPLICATE_GROUP_STYLE);
+    expect(duplicateStatusStyle("duplicated_both")).toBe(DUPLICATE_GROUP_STYLE);
+    expect(displayStatusStyle("ON")).toBeUndefined();
+    expect(productStatusStyle("SALE")).toBeUndefined();
+    expect(displayStatusStyle("SUSPENSION")).toEqual(productStatusStyle("OUTOFSTOCK"));
+    expect(productStatusStyle("REJECTION")).toEqual(productStatusStyle("PROHIBITION"));
+    expect(productStatusStyle("UNKNOWN")).toEqual(UNKNOWN_STATUS_STYLE);
+    expect(uniqueBackgroundCount(PRODUCT_STATUS_STYLES)).toBe(4);
+    expect(uniqueBackgroundCount(DISPLAY_STATUS_STYLES)).toBe(2);
   });
 
   it("keeps every managed color pairing at WCAG AA contrast or better", () => {
     const styles = [
       SHEET_HEADER_STYLE,
       UNKNOWN_STATUS_STYLE,
-      ...DUPLICATE_GROUP_STYLES,
+      DUPLICATE_GROUP_STYLE,
       ...Object.values(PRODUCT_STATUS_STYLES),
       ...Object.values(DISPLAY_STATUS_STYLES),
-      ...Object.values(DUPLICATE_STATUS_STYLES),
     ];
 
     for (const style of styles) {
