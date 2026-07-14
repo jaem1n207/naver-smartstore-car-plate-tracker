@@ -19,7 +19,7 @@ Run this only on a fixed-IP staging or production server.
 5. Confirm the first five tabs are the two inventory views, two store-specific plate-duplicate views, and the cross-store plate-duplicate view.
 6. Confirm operator tables expose `차량번호`, `중복 상태`, `상품 URL`, `스토어 표시명`, `전시 상태`, `상품 상태`, `상품명`, `최초 감지일시`, `마지막 동기화일시`, `관리자 메모`, `마지막 오류일시`, and `오류 메시지` in that order.
 7. Confirm the header has white text on a dark teal background and `차량번호` plus `중복 상태` remain frozen while scrolling horizontally.
-8. In both inventory and duplicate tabs, confirm duplicate rows appear before unique rows, equal plate numbers are adjacent with the same background and top/bottom border, and the next plate group uses a different background.
+8. In both inventory and duplicate tabs, confirm duplicate rows appear before unique rows, equal plate numbers are adjacent, and only their first two cells share the same amber background and top/bottom border.
 9. Confirm only the first two cells of duplicate rows use the amber group treatment, normal `ON` and `SALE` cells remain neutral, and exception statuses use readable semantic colors against the surrounding browser theme.
 10. Confirm `원본 데이터`, `차량번호 추출 실패`, and `실행 기록` follow the operator tabs.
 11. Confirm `차량번호 추출 실패` has image-only or no-text products.
