@@ -294,7 +294,6 @@ _load_lock_owner() {
   local pid_line
   local start_ticks_line
   local token_line
-  local extra_line
   local parsed_pid
 
   [[ -d $lock_dir && ! -L $lock_dir ]] || return 1
@@ -307,7 +306,7 @@ _load_lock_owner() {
     exec 3<&-
     return 1
   fi
-  if IFS= read -r extra_line <&3; then
+  if IFS= read -r _ <&3; then
     exec 3<&-
     return 1
   fi
@@ -335,7 +334,7 @@ _is_safe_lock_pid() {
   if [[ ${#value} -gt ${#maximum} ]]; then
     return 1
   fi
-  [[ $value == "$maximum" || $value < "$maximum" ]]
+  (( 10#$value <= 10#$maximum ))
 }
 
 _create_sync_lock() {
