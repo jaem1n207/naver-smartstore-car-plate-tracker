@@ -24,9 +24,11 @@ jobs:
 
       - name: Check out repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
           version: 11.10.0
           run_install: false
@@ -46,21 +48,40 @@ jobs:
       - name: Validate shell syntax
         run: bash -n ops/deployment/*.sh ops/deployment/lib/*.sh
 
+      - name: Install pinned static analyzers
+        run: |
+          set -Eeuo pipefail
+          tools_directory="${RUNNER_TEMP}/static-tools"
+          actionlint_archive="${RUNNER_TEMP}/actionlint_1.7.7_linux_amd64.tar.gz"
+          shellcheck_archive="${RUNNER_TEMP}/shellcheck-v0.10.0.linux.x86_64.tar.xz"
+          install -d -m 0755 "${tools_directory}"
+
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz \
+            --output "${actionlint_archive}"
+          printf '%s  %s\n' \
+            023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757 \
+            "${actionlint_archive}" | sha256sum --check
+          tar --extract --gzip --file="${actionlint_archive}" --directory="${tools_directory}" actionlint
+
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz \
+            --output "${shellcheck_archive}"
+          printf '%s  %s\n' \
+            6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87 \
+            "${shellcheck_archive}" | sha256sum --check
+          tar --extract --xz --file="${shellcheck_archive}" --directory="${tools_directory}" \
+            --strip-components=1 shellcheck-v0.10.0/shellcheck
+          chmod 0555 "${tools_directory}/actionlint" "${tools_directory}/shellcheck"
+
       - name: Run actionlint
-        uses: reviewdog/action-actionlint@6fb7acc99f4a1008869fa8a0f09cfca740837d9d
-        with:
-          reporter: local
-          filter_mode: nofilter
-          fail_level: error
+        run: '"${RUNNER_TEMP}/static-tools/actionlint"'
 
       - name: Run shellcheck
-        uses: reviewdog/action-shellcheck@4c07458293ac342d477251099501a718ae5ef86e
-        with:
-          reporter: local
-          filter_mode: nofilter
-          fail_level: error
-          path: ops/deployment
-          pattern: "*.sh"
+        run: >-
+          find ops/deployment -type f -name '*.sh' -print0 |
+          sort --zero-terminated |
+          xargs --null "${RUNNER_TEMP}/static-tools/shellcheck"
 
       - name: Run complete test suite
         run: pnpm test:all

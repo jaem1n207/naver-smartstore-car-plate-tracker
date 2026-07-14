@@ -10,14 +10,13 @@ const workflowPath = join(repositoryRoot, ".github/workflows/deploy-production.y
 const dependabotPath = join(repositoryRoot, ".github/dependabot.yml");
 const codeownersPath = join(repositoryRoot, ".github/CODEOWNERS");
 const nodeVersionPath = join(repositoryRoot, ".node-version");
+const packageJsonPath = join(repositoryRoot, "package.json");
 
 const expectedActionPins = new Set([
   "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
   "actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38",
-  "pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34",
+  "pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1",
   "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-  "reviewdog/action-actionlint@6fb7acc99f4a1008869fa8a0f09cfca740837d9d",
-  "reviewdog/action-shellcheck@4c07458293ac342d477251099501a718ae5ef86e",
 ]);
 
 const expectedSecrets = new Set([
@@ -177,6 +176,18 @@ describe("production deployment workflow", () => {
     expect(commands).toContain("pnpm build");
     expect(commands).toContain("bash -n ops/deployment/*.sh ops/deployment/lib/*.sh");
     expect(commands).toContain("git diff --exit-code -- tests/visual/fixtures/sheets-view.css");
+    expect(commands).toContain("actionlint_1.7.7_linux_amd64.tar.gz");
+    expect(commands).toContain("023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757");
+    expect(commands).toContain("shellcheck-v0.10.0.linux.x86_64.tar.xz");
+    expect(commands).toContain("6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87");
+    expect(commands.match(/sha256sum --check/gu)).toHaveLength(2);
+    expect(commands).not.toContain("reviewdog");
+
+    expect(verify["runs-on"]).toBe("ubuntu-24.04");
+    expect(deploy["runs-on"]).toBe("ubuntu-24.04");
+
+    const checkout = verify.steps.find((step) => step.uses?.startsWith("actions/checkout@"));
+    expect(checkout?.with).toMatchObject({ "persist-credentials": false });
 
     const setupNode = verify.steps.find((step) => step.uses?.startsWith("actions/setup-node@"));
     expect(setupNode?.with).toMatchObject({
@@ -197,17 +208,30 @@ describe("production deployment workflow", () => {
     expect(String(diagnostics?.with?.path)).toContain("playwright-report");
     expect(String(diagnostics?.with?.path)).toContain("test-results");
 
-    for (const staticAnalysisStep of verify.steps.filter(
-      (step) =>
-        step.uses?.startsWith("reviewdog/action-actionlint@") === true ||
-        step.uses?.startsWith("reviewdog/action-shellcheck@") === true,
-    )) {
-      expect(staticAnalysisStep.with).toMatchObject({
-        fail_level: "error",
-        filter_mode: "nofilter",
-        reporter: "local",
-      });
-    }
+    expect(getStep(verify, "Run actionlint").run).toContain(
+      '"${RUNNER_TEMP}/static-tools/actionlint"',
+    );
+    expect(getStep(verify, "Run shellcheck").run).toContain(
+      '"${RUNNER_TEMP}/static-tools/shellcheck"',
+    );
+  });
+
+  it("pins the runner, Node.js, and pnpm production toolchain", async () => {
+    const nodeVersion = (await readFile(nodeVersionPath, "utf8")).trim();
+    const packageJson: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
+    const packageContract = z
+      .object({
+        engines: z.object({ node: z.string() }),
+        packageManager: z.string(),
+      })
+      .parse(packageJson);
+
+    expect(nodeVersion).toBe("22.23.1");
+    expect(packageContract.packageManager).toBe("pnpm@11.10.0");
+    expect(packageContract.engines.node).toBe(">=22.13");
+    const [major, minor] = nodeVersion.split(".").map(Number);
+    expect(major).toBe(22);
+    expect(minor).toBeGreaterThanOrEqual(13);
   });
 
   it("uses only deploy credentials and sends one strict bounded forced command", async () => {
