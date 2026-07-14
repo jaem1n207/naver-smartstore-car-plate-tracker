@@ -246,6 +246,13 @@ describe("validate_candidate_tree", () => {
     await expectShellFailure("validate_candidate_tree", writable);
   });
 
+  it("rejects a FIFO without opening the special file", async () => {
+    const candidate = await createTemporaryDirectory("carplate-candidate-");
+    await expectProcessSuccess("mkfifo", [join(candidate, "unsafe-fifo")]);
+
+    await expectShellFailure("validate_candidate_tree", candidate);
+  });
+
   it.runIf(process.platform === "darwin")(
     "rejects candidate content with extended attributes",
     async () => {

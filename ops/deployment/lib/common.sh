@@ -208,6 +208,8 @@ for current, directories, files in os.walk(root, followlinks=False):
         path = os.path.join(current, name)
         metadata = os.lstat(path)
         mode = metadata.st_mode
+        if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode) or stat.S_ISLNK(mode)):
+            raise SystemExit(1)
         validate_metadata(path)
         if stat.S_ISLNK(mode):
             target = os.readlink(path)
@@ -217,8 +219,6 @@ for current, directories, files in os.walk(root, followlinks=False):
             if os.path.commonpath((root, resolved)) != root or not os.path.exists(resolved):
                 raise SystemExit(1)
             continue
-        if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
-            raise SystemExit(1)
         if mode & (stat.S_IWGRP | stat.S_IWOTH | stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX):
             raise SystemExit(1)
 ' "$candidate_root"
