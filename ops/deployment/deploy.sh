@@ -26,7 +26,8 @@ readonly MINIMUM_SWAP_KIB=2097152
 readonly MINIMUM_DISK_KIB=3145728
 readonly MINIMUM_MEMORY_KIB=131072
 
-readonly DEPLOY_SCRIPT_DIRECTORY=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+DEPLOY_SCRIPT_DIRECTORY=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+readonly DEPLOY_SCRIPT_DIRECTORY
 if [[ ${BASH_SOURCE[0]} != "$0" ]]; then
   # shellcheck source=ops/deployment/lib/common.sh
   source "$DEPLOY_SCRIPT_DIRECTORY/lib/common.sh"

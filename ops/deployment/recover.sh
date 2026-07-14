@@ -10,7 +10,8 @@ readonly PRODUCTION_RECOVER_ATOMIC_FS=/usr/local/lib/naver-smartstore-car-plate-
 readonly PRODUCTION_RECOVER_FLOCK=/usr/bin/flock
 readonly PRODUCTION_RECOVER_COMMON=/usr/local/lib/naver-smartstore-car-plate-tracker/lib/common.sh
 
-readonly RECOVER_SCRIPT_DIRECTORY=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+RECOVER_SCRIPT_DIRECTORY=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+readonly RECOVER_SCRIPT_DIRECTORY
 if [[ ${BASH_SOURCE[0]} != "$0" ]]; then
   # shellcheck source=ops/deployment/lib/common.sh
   source "$RECOVER_SCRIPT_DIRECTORY/lib/common.sh"
