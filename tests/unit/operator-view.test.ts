@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DISPLAY_STATUS_STYLES,
-  DUPLICATE_GROUP_STYLE,
+  DUPLICATED_ACROSS_STORES_STYLE,
+  DUPLICATED_BOTH_STYLE,
+  DUPLICATED_IN_SAME_STORE_STYLE,
   duplicateStatusStyle,
   displayStatusStyle,
   findDuplicateGroups,
@@ -62,11 +64,33 @@ describe("operator sheet presentation", () => {
     ]);
   });
 
-  it("uses color for duplicate and exception states while leaving normal states neutral", () => {
+  it("uses a distinct approved palette for each duplicate meaning", () => {
     expect(duplicateStatusStyle("unique")).toBeUndefined();
-    expect(duplicateStatusStyle("duplicated_in_same_store")).toBe(DUPLICATE_GROUP_STYLE);
-    expect(duplicateStatusStyle("duplicated_across_stores")).toBe(DUPLICATE_GROUP_STYLE);
-    expect(duplicateStatusStyle("duplicated_both")).toBe(DUPLICATE_GROUP_STYLE);
+    expect(duplicateStatusStyle("duplicated_in_same_store")).toEqual({
+      backgroundHex: "#FFF3C4",
+      foregroundHex: "#5B3A00",
+      borderHex: "#B7791F",
+    });
+    expect(duplicateStatusStyle("duplicated_across_stores")).toEqual({
+      backgroundHex: "#E8F0FE",
+      foregroundHex: "#174EA6",
+      borderHex: "#3B6FC4",
+    });
+    expect(duplicateStatusStyle("duplicated_both")).toEqual({
+      backgroundHex: "#FCE8E6",
+      foregroundHex: "#8A1C1C",
+      borderHex: "#C5221F",
+    });
+    expect(
+      new Set([
+        DUPLICATED_IN_SAME_STORE_STYLE.backgroundHex,
+        DUPLICATED_ACROSS_STORES_STYLE.backgroundHex,
+        DUPLICATED_BOTH_STYLE.backgroundHex,
+      ]),
+    ).toHaveLength(3);
+  });
+
+  it("uses color for exception states while leaving normal states neutral", () => {
     expect(displayStatusStyle("ON")).toBeUndefined();
     expect(productStatusStyle("SALE")).toBeUndefined();
     expect(displayStatusStyle("SUSPENSION")).toEqual(productStatusStyle("OUTOFSTOCK"));
@@ -80,7 +104,9 @@ describe("operator sheet presentation", () => {
     const styles = [
       SHEET_HEADER_STYLE,
       UNKNOWN_STATUS_STYLE,
-      DUPLICATE_GROUP_STYLE,
+      DUPLICATED_IN_SAME_STORE_STYLE,
+      DUPLICATED_ACROSS_STORES_STYLE,
+      DUPLICATED_BOTH_STYLE,
       ...Object.values(PRODUCT_STATUS_STYLES),
       ...Object.values(DISPLAY_STATUS_STYLES),
     ];

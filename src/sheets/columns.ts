@@ -141,9 +141,9 @@ const EXTRACTION_STATUS_LABELS: Record<PlateExtractionStatus, string> = {
 
 const DUPLICATE_STATUS_LABELS: Record<DuplicateStatus, string> = {
   unique: "중복 없음",
-  duplicated_in_same_store: "스토어 내부 중복",
-  duplicated_across_stores: "양쪽 스토어 중복",
-  duplicated_both: "내부 및 양쪽 중복",
+  duplicated_in_same_store: "같은 스토어 내 중복",
+  duplicated_across_stores: "두 스토어 간 중복",
+  duplicated_both: "같은 스토어 + 두 스토어 중복",
 };
 
 export const RAW_DATA_HEADERS = RAW_DATA_COLUMNS.map((column) => RAW_DATA_HEADER_BY_COLUMN[column]);
@@ -151,7 +151,7 @@ export const OPERATOR_VIEW_HEADERS = OPERATOR_VIEW_COLUMNS.map(
   (column) => OPERATOR_VIEW_HEADER_BY_COLUMN[column],
 );
 
-export const RUN_LOG_HEADERS: string[] = [
+export const LEGACY_RUN_LOG_HEADERS: readonly string[] = [
   "실행 시작일시",
   "실행 종료일시",
   "실행 모드",
@@ -159,6 +159,20 @@ export const RUN_LOG_HEADERS: string[] = [
   "추출 성공 수",
   "추출 실패 수",
   "중복 상품 수",
+  "실행 결과",
+];
+
+export const RUN_LOG_HEADERS: string[] = [
+  "실행 시작일시",
+  "실행 종료일시",
+  "실행 모드",
+  "실행 범위",
+  "실행 대상 스토어",
+  "이번 실행 동기화 상품 수",
+  "시트 전체 상품 수",
+  "시트 전체 추출 성공 수",
+  "시트 전체 추출 실패 수",
+  "시트 전체 중복 상품 행 수",
   "실행 결과",
 ];
 
@@ -292,12 +306,15 @@ export function parseDuplicateStatus(value: string): DuplicateStatus {
     case "중복 없음":
       return "unique";
     case "duplicated_in_same_store":
+    case "같은 스토어 내 중복":
     case "스토어 내부 중복":
       return "duplicated_in_same_store";
     case "duplicated_across_stores":
+    case "두 스토어 간 중복":
     case "양쪽 스토어 중복":
       return "duplicated_across_stores";
     case "duplicated_both":
+    case "같은 스토어 + 두 스토어 중복":
     case "내부 및 양쪽 중복":
       return "duplicated_both";
     default:

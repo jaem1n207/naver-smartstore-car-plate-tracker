@@ -6,6 +6,7 @@ import {
   OPERATOR_VIEW_HEADERS,
   RAW_DATA_COLUMNS,
   RAW_DATA_HEADERS,
+  RUN_LOG_HEADERS,
   sheetProductRowToOperatorValues,
   sheetProductRowToValues,
   valuesToSheetProductRow,
@@ -51,9 +52,9 @@ const duplicateStatusCases: Array<{
   label: string;
 }> = [
   { status: "unique", label: "중복 없음" },
-  { status: "duplicated_in_same_store", label: "스토어 내부 중복" },
-  { status: "duplicated_across_stores", label: "양쪽 스토어 중복" },
-  { status: "duplicated_both", label: "내부 및 양쪽 중복" },
+  { status: "duplicated_in_same_store", label: "같은 스토어 내 중복" },
+  { status: "duplicated_across_stores", label: "두 스토어 간 중복" },
+  { status: "duplicated_both", label: "같은 스토어 + 두 스토어 중복" },
 ];
 
 describe("sheet row column helpers", () => {
@@ -88,6 +89,22 @@ describe("sheet row column helpers", () => {
       "상세설명 일부",
       "API 추적 ID",
       "관리자 메모",
+    ]);
+  });
+
+  it("uses explicit localized headers for every run-log field", () => {
+    expect(RUN_LOG_HEADERS).toEqual([
+      "실행 시작일시",
+      "실행 종료일시",
+      "실행 모드",
+      "실행 범위",
+      "실행 대상 스토어",
+      "이번 실행 동기화 상품 수",
+      "시트 전체 상품 수",
+      "시트 전체 추출 성공 수",
+      "시트 전체 추출 실패 수",
+      "시트 전체 중복 상품 행 수",
+      "실행 결과",
     ]);
   });
 
@@ -140,7 +157,7 @@ describe("sheet row column helpers", () => {
     ]);
     expect(sheetProductRowToOperatorValues(duplicateRow)).toEqual([
       "123가4567",
-      "내부 및 양쪽 중복",
+      "같은 스토어 + 두 스토어 중복",
       "https://example.com/store-a/products/2001",
       "Store A",
       "ON",
@@ -173,6 +190,19 @@ describe("sheet row column helpers", () => {
       extractionStatus: "not_found",
       duplicateStatus: "duplicated_across_stores",
     });
+  });
+
+  it("continues to parse legacy Korean duplicate labels", () => {
+    const values = sheetProductRowToValues(baseRow);
+
+    values[12] = "스토어 내부 중복";
+    expect(valuesToSheetProductRow(values).duplicateStatus).toBe("duplicated_in_same_store");
+
+    values[12] = "양쪽 스토어 중복";
+    expect(valuesToSheetProductRow(values).duplicateStatus).toBe("duplicated_across_stores");
+
+    values[12] = "내부 및 양쪽 중복";
+    expect(valuesToSheetProductRow(values).duplicateStatus).toBe("duplicated_both");
   });
 
   it("round-trips every Korean extraction and duplicate status label", () => {

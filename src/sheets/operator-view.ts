@@ -26,10 +26,22 @@ export const UNKNOWN_STATUS_STYLE: OperatorCellStyle = {
   foregroundHex: "#343A40",
 };
 
-export const DUPLICATE_GROUP_STYLE: DuplicateGroupStyle = {
+export const DUPLICATED_IN_SAME_STORE_STYLE: DuplicateGroupStyle = {
   backgroundHex: "#FFF3C4",
   foregroundHex: "#5B3A00",
   borderHex: "#B7791F",
+};
+
+export const DUPLICATED_ACROSS_STORES_STYLE: DuplicateGroupStyle = {
+  backgroundHex: "#E8F0FE",
+  foregroundHex: "#174EA6",
+  borderHex: "#3B6FC4",
+};
+
+export const DUPLICATED_BOTH_STYLE: DuplicateGroupStyle = {
+  backgroundHex: "#FCE8E6",
+  foregroundHex: "#8A1C1C",
+  borderHex: "#C5221F",
 };
 
 const INFORMATION_STATUS_STYLE: OperatorCellStyle = {
@@ -107,8 +119,17 @@ export function findDuplicateGroups(rows: readonly SheetProductRow[]): Duplicate
   return groups;
 }
 
-export function duplicateStatusStyle(status: DuplicateStatus): OperatorCellStyle | undefined {
-  return status === "unique" ? undefined : DUPLICATE_GROUP_STYLE;
+export function duplicateStatusStyle(status: DuplicateStatus): DuplicateGroupStyle | undefined {
+  switch (status) {
+    case "duplicated_in_same_store":
+      return DUPLICATED_IN_SAME_STORE_STYLE;
+    case "duplicated_across_stores":
+      return DUPLICATED_ACROSS_STORES_STYLE;
+    case "duplicated_both":
+      return DUPLICATED_BOTH_STYLE;
+    case "unique":
+      return undefined;
+  }
 }
 
 export function displayStatusStyle(status: string): OperatorCellStyle | undefined {
