@@ -12,6 +12,7 @@ import {
   RAW_DATA_COLUMNS,
   RAW_DATA_HEADERS,
   RAW_DATA_TAB,
+  LEGACY_RUN_LOG_HEADERS,
   RUN_LOG_HEADERS,
   RUN_LOG_TAB,
   sheetProductRowToOperatorValues,
@@ -21,7 +22,6 @@ import {
 import type { SheetTabDefinition, SheetTabNames } from "./columns.js";
 import {
   displayStatusStyle,
-  DUPLICATE_GROUP_STYLE,
   duplicateStatusStyle,
   findDuplicateGroups,
   productStatusStyle,
@@ -37,7 +37,7 @@ const RUN_LOG_END_COLUMN = columnNameForColumnCount(RUN_LOG_HEADERS.length);
 const MAX_MANAGED_PRODUCT_COLUMNS = RAW_DATA_COLUMNS.length;
 const MIN_TABLE_ROW_COUNT = 2;
 const OPERATOR_COLUMN_WIDTHS: readonly number[] = [
-  120, 160, 320, 220, 125, 135, 240, 170, 170, 220, 170, 320,
+  120, 240, 320, 220, 125, 135, 240, 170, 170, 220, 170, 320,
 ];
 const OPERATOR_FORMAT_FIELDS =
   "userEnteredFormat(backgroundColorStyle,textFormat.bold,textFormat.foregroundColorStyle)";
@@ -97,6 +97,11 @@ export class GoogleSheetRepository implements SheetRepository {
     this.sheets = createSheetsClient({ version: "v4", auth });
   }
 
+  async prepareRunLog(): Promise<void> {
+    await this.ensureTabs();
+    await this.writeRunLogHeader(await this.readRunLogValues());
+  }
+
   async readRawData(): Promise<SheetProductRow[]> {
     await this.ensureTabs();
 
@@ -142,20 +147,10 @@ export class GoogleSheetRepository implements SheetRepository {
 
   async appendRunLog(row: RunLogRow): Promise<void> {
     await this.ensureTabs();
-    const currentValuesResponse = await this.sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: sheetRange(RUN_LOG_TAB, `A:${RUN_LOG_END_COLUMN}`),
-    });
-    const currentRowCount = googleValuesToRows(currentValuesResponse.data.values).length;
+    const currentValues = await this.readRunLogValues();
+    const currentRowCount = currentValues.length;
 
-    await this.sheets.spreadsheets.values.update({
-      spreadsheetId: this.spreadsheetId,
-      range: sheetRange(RUN_LOG_TAB, `A1:${RUN_LOG_END_COLUMN}1`),
-      valueInputOption: "RAW",
-      requestBody: {
-        values: [RUN_LOG_HEADERS],
-      },
-    });
+    await this.writeRunLogHeader(currentValues);
     await this.sheets.spreadsheets.values.append({
       spreadsheetId: this.spreadsheetId,
       range: sheetRange(RUN_LOG_TAB, `A:${RUN_LOG_END_COLUMN}`),
@@ -167,11 +162,14 @@ export class GoogleSheetRepository implements SheetRepository {
             row.runStartedAt,
             row.runFinishedAt,
             runModeLabel(row.mode),
-            row.totalProducts,
-            row.successCount,
-            row.failureCount,
-            row.duplicateCount,
-            row.message,
+            syncScopeLabel(row.syncScope),
+            row.selectedStores.join(", "),
+            row.syncedProductsThisRun,
+            row.sheetTotalProducts,
+            row.sheetExtractionSuccess,
+            row.sheetExtractionFailure,
+            row.sheetDuplicateProductRows,
+            row.summary,
           ],
         ],
       },
@@ -180,6 +178,43 @@ export class GoogleSheetRepository implements SheetRepository {
       this.definitionForTitle(RUN_LOG_TAB),
       Math.max(currentRowCount + 1, MIN_TABLE_ROW_COUNT),
     );
+  }
+
+  private async readRunLogValues(): Promise<unknown[][]> {
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: sheetRange(RUN_LOG_TAB, `A:${RUN_LOG_END_COLUMN}`),
+    });
+
+    return googleValuesToRows(response.data.values);
+  }
+
+  private async writeRunLogHeader(currentValues: readonly unknown[][]): Promise<void> {
+    if (hasExactHeader(currentValues[0], RUN_LOG_HEADERS)) {
+      return;
+    }
+
+    const values =
+      currentValues.length === 0
+        ? [RUN_LOG_HEADERS]
+        : hasExactHeader(currentValues[0], LEGACY_RUN_LOG_HEADERS)
+          ? migrateLegacyRunLogValues(currentValues)
+          : undefined;
+
+    if (values === undefined) {
+      throw new Error(
+        "실행 기록 헤더가 지원되지 않는 형식입니다. 빈 시트, 기존 8열 헤더, 현재 11열 헤더만 사용할 수 있습니다",
+      );
+    }
+
+    const endRow = values.length;
+
+    await this.sheets.spreadsheets.values.update({
+      spreadsheetId: this.spreadsheetId,
+      range: sheetRange(RUN_LOG_TAB, `A1:${RUN_LOG_END_COLUMN}${String(endRow)}`),
+      valueInputOption: "RAW",
+      requestBody: { values },
+    });
   }
 
   private ensureTabs(): Promise<void> {
@@ -668,15 +703,14 @@ function createOperatorFormattingRequests(
 ): sheets_v4.Schema$Request[] {
   const requests: sheets_v4.Schema$Request[] = [];
   const duplicateGroups = findDuplicateGroups(rows);
-  const groupStyleByRowIndex = duplicateGroupStylesByRowIndex(duplicateGroups);
 
   if (rows.length > 0) {
     requests.push({
       updateCells: {
         start: { sheetId, rowIndex: 1, columnIndex: 0 },
-        rows: rows.map((row, rowIndex) => ({
+        rows: rows.map((row) => ({
           values: OPERATOR_VIEW_COLUMNS.map((column) => ({
-            userEnteredFormat: operatorCellFormat(row, column, groupStyleByRowIndex.get(rowIndex)),
+            userEnteredFormat: operatorCellFormat(row, column),
           })),
         })),
         fields: OPERATOR_FORMAT_FIELDS,
@@ -718,9 +752,10 @@ function createOperatorFormattingRequests(
   });
 
   for (const group of duplicateGroups) {
+    const groupStyle = duplicateGroupStyleForRows(rows, group);
     const border = {
       style: "SOLID_MEDIUM",
-      colorStyle: colorStyleFromHex(DUPLICATE_GROUP_STYLE.borderHex),
+      colorStyle: colorStyleFromHex(groupStyle.borderHex),
     };
     requests.push({
       updateBorders: {
@@ -740,29 +775,39 @@ function createOperatorFormattingRequests(
   return requests;
 }
 
-function duplicateGroupStylesByRowIndex(
-  groups: readonly DuplicateGroup[],
-): Map<number, DuplicateGroupStyle> {
-  const stylesByRowIndex = new Map<number, DuplicateGroupStyle>();
+function duplicateGroupStyleForRows(
+  rows: readonly SheetProductRow[],
+  group: DuplicateGroup,
+): DuplicateGroupStyle {
+  const groupRows = rows.slice(group.startIndex, group.endIndex);
 
-  for (const group of groups) {
-    for (let index = group.startIndex; index < group.endIndex; index += 1) {
-      stylesByRowIndex.set(index, DUPLICATE_GROUP_STYLE);
+  const statusPriority: readonly DuplicateStatus[] = [
+    "duplicated_both",
+    "duplicated_across_stores",
+    "duplicated_in_same_store",
+  ];
+
+  for (const status of statusPriority) {
+    if (groupRows.some((row) => row.duplicateStatus === status)) {
+      const style = duplicateStatusStyle(status);
+
+      if (style !== undefined) {
+        return style;
+      }
     }
   }
 
-  return stylesByRowIndex;
+  throw new Error(`Duplicate group has no duplicate status: ${group.plate}`);
 }
 
 function operatorCellFormat(
   row: SheetProductRow,
   column: (typeof OPERATOR_VIEW_COLUMNS)[number],
-  groupStyle: DuplicateGroupStyle | undefined,
 ): sheets_v4.Schema$CellFormat {
   const statusStyle = statusStyleForColumn(row, column);
   const duplicateKeyStyle =
-    groupStyle !== undefined && (column === "normalizedPlate" || column === "duplicateStatus")
-      ? groupStyle
+    column === "normalizedPlate" || column === "duplicateStatus"
+      ? duplicateStatusStyle(row.duplicateStatus)
       : undefined;
   const backgroundHex = statusStyle?.backgroundHex ?? duplicateKeyStyle?.backgroundHex;
   const foregroundHex =
@@ -822,6 +867,66 @@ function decodeServiceAccountCredentials(encodedJson: string | undefined) {
 
 function runModeLabel(mode: RunLogRow["mode"]): string {
   return mode === "live" ? "실제 연동" : "모의 실행";
+}
+
+function syncScopeLabel(scope: RunLogRow["syncScope"]): string {
+  return scope === "all_stores" ? "전체 스토어" : "선택 스토어";
+}
+
+function hasExactHeader(row: readonly unknown[] | undefined, expected: readonly string[]): boolean {
+  return (
+    row !== undefined &&
+    row.length === expected.length &&
+    row.every((value, index) => value === expected[index])
+  );
+}
+
+function legacyRunLogRowToValues(row: readonly unknown[]): unknown[] {
+  if (isBlankRunLogRow(row)) {
+    return RUN_LOG_HEADERS.map(() => "");
+  }
+
+  return [
+    row[0] ?? "",
+    row[1] ?? "",
+    row[2] ?? "",
+    "이전 형식",
+    "",
+    "",
+    row[3] ?? "",
+    row[4] ?? "",
+    row[5] ?? "",
+    row[6] ?? "",
+    row[7] ?? "",
+  ];
+}
+
+function migrateLegacyRunLogValues(currentValues: readonly unknown[][]): unknown[][] {
+  const legacyRows = currentValues.slice(1);
+
+  if (legacyRows.some(hasNonEmptyLegacyTrailingCell)) {
+    throw new Error(
+      "실행 기록 기존 8열 데이터의 I:K 영역에 값이 있어 자동 마이그레이션할 수 없습니다",
+    );
+  }
+
+  return [RUN_LOG_HEADERS, ...legacyRows.map(legacyRunLogRowToValues)];
+}
+
+function hasNonEmptyLegacyTrailingCell(row: readonly unknown[]): boolean {
+  return row.slice(LEGACY_RUN_LOG_HEADERS.length).some((value) => !isBlankRunLogCell(value));
+}
+
+function isBlankRunLogRow(row: readonly unknown[]): boolean {
+  return row.every(isBlankRunLogCell);
+}
+
+function isBlankRunLogCell(value: unknown): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" && value.trim().length === 0)
+  );
 }
 
 function isActiveProductRow(row: SheetProductRow): boolean {

@@ -12,7 +12,7 @@ import type {
   NaverProductDetail,
   NaverProductSummary,
 } from "../naver/types.js";
-import type { SheetProductRow, SheetRepository } from "../sheets/types.js";
+import type { SheetProductRow, SheetRepository, SyncScope } from "../sheets/types.js";
 
 export interface SyncJobDependencies {
   readonly env: AppEnv;
@@ -23,17 +23,22 @@ export interface SyncJobDependencies {
 }
 
 export interface SyncJobResult {
-  readonly totalProducts: number;
-  readonly successCount: number;
-  readonly failureCount: number;
-  readonly duplicateCount: number;
+  readonly syncScope: SyncScope;
+  readonly selectedStores: readonly string[];
+  readonly syncedProductsThisRun: number;
+  readonly sheetTotalProducts: number;
+  readonly sheetExtractionSuccess: number;
+  readonly sheetExtractionFailure: number;
+  readonly sheetDuplicateProductRows: number;
+  readonly summary: string;
 }
 
 export async function runSyncJob(dependencies: SyncJobDependencies): Promise<SyncJobResult> {
+  const selectedStoreKeys = validateSelectedStores(dependencies.stores);
+  await dependencies.sheetRepository.prepareRunLog();
   const runStartedAt = dependencies.now().toISOString();
   const existingRows = await dependencies.sheetRepository.readRawData();
   const existingRowsByProduct = mapRowsByProduct(existingRows);
-  const selectedStoreKeys = new Set(dependencies.stores.map((store) => store.storeKey));
   const rows = existingRows.filter((row) => !selectedStoreKeys.has(row.storeKey));
   let syncedProductCount = 0;
 
@@ -56,7 +61,16 @@ export async function runSyncJob(dependencies: SyncJobDependencies): Promise<Syn
   }
 
   const rowsWithDuplicateStatuses = applyDuplicateStatuses(rows);
-  const result = summarizeRows(rowsWithDuplicateStatuses);
+  const sheetSummary = summarizeRows(rowsWithDuplicateStatuses);
+  const syncScope = syncScopeForStoreKeys(selectedStoreKeys);
+  const selectedStores = dependencies.stores.map((store) => store.storeDisplayName);
+  const result: SyncJobResult = {
+    syncScope,
+    selectedStores,
+    syncedProductsThisRun: syncedProductCount,
+    ...sheetSummary,
+    summary: syncRunSummary(syncScope, selectedStores, syncedProductCount, sheetSummary),
+  };
 
   await dependencies.sheetRepository.writeRawData(rowsWithDuplicateStatuses);
   await dependencies.sheetRepository.writeViews(rowsWithDuplicateStatuses);
@@ -65,22 +79,46 @@ export async function runSyncJob(dependencies: SyncJobDependencies): Promise<Syn
     runFinishedAt: dependencies.now().toISOString(),
     mode: dependencies.env.naverApiMode,
     ...result,
-    message: syncRunMessage(dependencies.stores, syncedProductCount, result.totalProducts),
   });
 
   return result;
 }
 
-function syncRunMessage(
+function validateSelectedStores(
   stores: readonly StoreConfig[],
-  syncedProductCount: number,
-  totalProducts: number,
-): string {
-  if (stores.length === 1) {
-    return `${stores[0]?.storeDisplayName ?? "선택 스토어"} ${String(syncedProductCount)}개 상품 선택 동기화 완료 (시트 전체 ${String(totalProducts)}개)`;
+): ReadonlySet<StoreConfig["storeKey"]> {
+  if (stores.length === 0) {
+    throw new Error("동기화 대상 스토어를 하나 이상 선택해야 합니다");
   }
 
-  return `총 ${String(totalProducts)}개 상품 동기화 완료`;
+  const storeKeys = new Set<StoreConfig["storeKey"]>();
+
+  for (const store of stores) {
+    if (storeKeys.has(store.storeKey)) {
+      throw new Error(`동기화 대상 스토어 키가 중복되었습니다: ${store.storeKey}`);
+    }
+
+    storeKeys.add(store.storeKey);
+  }
+
+  return storeKeys;
+}
+
+function syncScopeForStoreKeys(storeKeys: ReadonlySet<StoreConfig["storeKey"]>): SyncScope {
+  return storeKeys.size === 2 && storeKeys.has("A") && storeKeys.has("B")
+    ? "all_stores"
+    : "selected_stores";
+}
+
+function syncRunSummary(
+  syncScope: SyncScope,
+  selectedStores: readonly string[],
+  syncedProductCount: number,
+  sheetSummary: WholeSheetSummary,
+): string {
+  const scopeLabel = syncScope === "all_stores" ? "전체 스토어" : "선택 스토어";
+
+  return `${scopeLabel} 동기화 완료 | 대상: ${selectedStores.join(", ")} | 이번 실행 동기화 ${String(syncedProductCount)}개 | 시트 전체 상품 ${String(sheetSummary.sheetTotalProducts)}개 | 시트 전체 차량번호 추출 성공 ${String(sheetSummary.sheetExtractionSuccess)}개, 실패 ${String(sheetSummary.sheetExtractionFailure)}개 | 시트 전체 중복 상태 상품 행 ${String(sheetSummary.sheetDuplicateProductRows)}개`;
 }
 
 type MergedProduct = {
@@ -237,14 +275,21 @@ function applyDuplicateStatuses(rows: readonly SheetProductRow[]): SheetProductR
   }));
 }
 
-function summarizeRows(rows: readonly SheetProductRow[]): SyncJobResult {
-  const successCount = rows.filter((row) => row.extractionStatus === "success").length;
-  const duplicateCount = rows.filter((row) => row.duplicateStatus !== "unique").length;
+type WholeSheetSummary = {
+  readonly sheetTotalProducts: number;
+  readonly sheetExtractionSuccess: number;
+  readonly sheetExtractionFailure: number;
+  readonly sheetDuplicateProductRows: number;
+};
+
+function summarizeRows(rows: readonly SheetProductRow[]): WholeSheetSummary {
+  const sheetExtractionSuccess = rows.filter((row) => row.extractionStatus === "success").length;
+  const sheetDuplicateProductRows = rows.filter((row) => row.duplicateStatus !== "unique").length;
 
   return {
-    totalProducts: rows.length,
-    successCount,
-    failureCount: rows.length - successCount,
-    duplicateCount,
+    sheetTotalProducts: rows.length,
+    sheetExtractionSuccess,
+    sheetExtractionFailure: rows.length - sheetExtractionSuccess,
+    sheetDuplicateProductRows,
   };
 }

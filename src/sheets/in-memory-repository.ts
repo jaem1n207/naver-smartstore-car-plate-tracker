@@ -15,6 +15,10 @@ export class InMemorySheetRepository implements SheetRepository {
   viewRows: Record<string, SheetProductRow[]> = {};
   runLogs: RunLogRow[] = [];
 
+  prepareRunLog(): Promise<void> {
+    return Promise.resolve();
+  }
+
   readRawData(): Promise<SheetProductRow[]> {
     return Promise.resolve(structuredClone(this.rawRows));
   }

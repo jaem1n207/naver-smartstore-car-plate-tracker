@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createManagedSheetTabs,
+  LEGACY_RUN_LOG_HEADERS,
   OPERATOR_VIEW_HEADERS,
   RAW_DATA_COLUMNS,
   RAW_DATA_HEADERS,
@@ -455,19 +456,62 @@ describe("GoogleSheetRepository", () => {
     );
   });
 
-  it("applies high-contrast headers, exception colors, and compact duplicate grouping", async () => {
+  it("formats a realistic mixed group on the across-store duplicate tab", async () => {
     for (let index = 0; index < 6; index += 1) {
       googleapisMock.queueGetValues([]);
     }
-    const styledRow: SheetProductRow = {
+    const bothDuplicate: SheetProductRow = {
       ...baseRow,
       productStatus: "OUTOFSTOCK",
       displayStatus: "SUSPENSION",
       duplicateStatus: "duplicated_both",
     };
+    const secondBothDuplicate: SheetProductRow = {
+      ...bothDuplicate,
+      channelProductNo: "2002",
+      productUrl: "https://example.com/store-a/products/2002",
+    };
+    const acrossStoresDuplicate: SheetProductRow = {
+      ...bothDuplicate,
+      storeKey: "B",
+      storeName: STORE_B_DISPLAY_NAME,
+      channelProductNo: "4001",
+      productUrl: "https://example.com/store-b/products/4001",
+      duplicateStatus: "duplicated_across_stores",
+    };
+    const firstSameStoreDuplicate: SheetProductRow = {
+      ...bothDuplicate,
+      channelProductNo: "2003",
+      productUrl: "https://example.com/store-a/products/2003",
+      normalizedPlate: "234나5678",
+      duplicateStatus: "duplicated_in_same_store",
+    };
+    const secondSameStoreDuplicate: SheetProductRow = {
+      ...firstSameStoreDuplicate,
+      channelProductNo: "2004",
+      productUrl: "https://example.com/store-a/products/2004",
+    };
+    const mixedGroup = [bothDuplicate, secondBothDuplicate, acrossStoresDuplicate];
+
+    expect(
+      mixedGroup.map((row) => ({
+        storeKey: row.storeKey,
+        duplicateStatus: row.duplicateStatus,
+      })),
+    ).toEqual([
+      { storeKey: "A", duplicateStatus: "duplicated_both" },
+      { storeKey: "A", duplicateStatus: "duplicated_both" },
+      { storeKey: "B", duplicateStatus: "duplicated_across_stores" },
+    ]);
     const repository = await createRepository();
 
-    await repository.writeViews([styledRow]);
+    await repository.writeViews([
+      secondSameStoreDuplicate,
+      acrossStoresDuplicate,
+      secondBothDuplicate,
+      firstSameStoreDuplicate,
+      bothDuplicate,
+    ]);
 
     const requests = googleapisMock.batchUpdateCalls.flatMap(
       (call) => call.requestBody?.requests ?? [],
@@ -499,30 +543,74 @@ describe("GoogleSheetRepository", () => {
 
     const updateCellsRequest = requests
       .filter(hasUpdateCellsRequest)
-      .find((request) => request.updateCells.start.sheetId === 1);
-    const formattedCells = updateCellsRequest?.updateCells.rows[0]?.values ?? [];
-    const duplicateBackgrounds = [0, 1].map(
-      (columnIndex) => formattedCells[columnIndex]?.userEnteredFormat?.backgroundColorStyle,
-    );
+      .find((request) => request.updateCells.start.sheetId === 5);
+    const formattedRows = updateCellsRequest?.updateCells.rows ?? [];
+    const formattedCells = formattedRows[0]?.values ?? [];
     const exceptionBackgrounds = [4, 5].map(
       (columnIndex) => formattedCells[columnIndex]?.userEnteredFormat?.backgroundColorStyle,
     );
 
     expect(updateCellsRequest?.updateCells.start).toEqual({
-      sheetId: 1,
+      sheetId: 5,
       rowIndex: 1,
       columnIndex: 0,
     });
     expect(formattedCells[2]?.userEnteredFormat?.textFormat?.foregroundColorStyle).toBeUndefined();
-    expect(duplicateBackgrounds).toEqual([rgbStyle("#FFF3C4"), rgbStyle("#FFF3C4")]);
+    expect(
+      formattedRows.map((row) =>
+        [0, 1].map(
+          (columnIndex) => row.values?.[columnIndex]?.userEnteredFormat?.backgroundColorStyle,
+        ),
+      ),
+    ).toEqual([
+      [rgbStyle("#FCE8E6"), rgbStyle("#FCE8E6")],
+      [rgbStyle("#FCE8E6"), rgbStyle("#FCE8E6")],
+      [rgbStyle("#E8F0FE"), rgbStyle("#E8F0FE")],
+    ]);
     expect(exceptionBackgrounds).toEqual([rgbStyle("#FCE8D5"), rgbStyle("#FCE8D5")]);
     expect(formattedCells[3]?.userEnteredFormat).toEqual({ textFormat: { bold: false } });
     expect(requests).toContainEqual({
       updateBorders: {
         range: {
-          sheetId: 1,
+          sheetId: 5,
           startRowIndex: 1,
-          endRowIndex: 2,
+          endRowIndex: 4,
+          startColumnIndex: 0,
+          endColumnIndex: 2,
+        },
+        top: {
+          style: "SOLID_MEDIUM",
+          colorStyle: rgbStyle("#C5221F"),
+        },
+        bottom: {
+          style: "SOLID_MEDIUM",
+          colorStyle: rgbStyle("#C5221F"),
+        },
+      },
+    });
+    const storeAUpdateCellsRequest = requests
+      .filter(hasUpdateCellsRequest)
+      .find((request) => request.updateCells.start.sheetId === 1);
+    const storeAFormattedRows = storeAUpdateCellsRequest?.updateCells.rows ?? [];
+
+    expect(
+      storeAFormattedRows
+        .slice(2)
+        .map((row) =>
+          [0, 1].map(
+            (columnIndex) => row.values?.[columnIndex]?.userEnteredFormat?.backgroundColorStyle,
+          ),
+        ),
+    ).toEqual([
+      [rgbStyle("#FFF3C4"), rgbStyle("#FFF3C4")],
+      [rgbStyle("#FFF3C4"), rgbStyle("#FFF3C4")],
+    ]);
+    expect(requests).toContainEqual({
+      updateBorders: {
+        range: {
+          sheetId: 1,
+          startRowIndex: 3,
+          endRowIndex: 5,
           startColumnIndex: 0,
           endColumnIndex: 2,
         },
@@ -534,6 +622,18 @@ describe("GoogleSheetRepository", () => {
           style: "SOLID_MEDIUM",
           colorStyle: rgbStyle("#B7791F"),
         },
+      },
+    });
+    expect(requests).toContainEqual({
+      updateDimensionProperties: {
+        range: {
+          sheetId: 1,
+          dimension: "COLUMNS",
+          startIndex: 1,
+          endIndex: 2,
+        },
+        properties: { pixelSize: 240, hiddenByUser: false },
+        fields: "pixelSize,hiddenByUser",
       },
     });
   });
@@ -802,17 +902,20 @@ describe("GoogleSheetRepository", () => {
       runStartedAt: "2026-07-09T00:00:00.000Z",
       runFinishedAt: "2026-07-09T00:01:00.000Z",
       mode: "live",
-      totalProducts: 5,
-      successCount: 4,
-      failureCount: 1,
-      duplicateCount: 3,
-      message: "동기화 완료",
+      syncScope: "all_stores",
+      selectedStores: [STORE_A_DISPLAY_NAME, STORE_B_DISPLAY_NAME],
+      syncedProductsThisRun: 5,
+      sheetTotalProducts: 5,
+      sheetExtractionSuccess: 4,
+      sheetExtractionFailure: 1,
+      sheetDuplicateProductRows: 3,
+      summary: "동기화 완료",
     });
 
     expect(googleapisMock.updateCalls).toEqual([
       {
         spreadsheetId: "spreadsheet-id",
-        range: "'실행 기록'!A1:H1",
+        range: "'실행 기록'!A1:K1",
         valueInputOption: "RAW",
         requestBody: { values: [RUN_LOG_HEADERS] },
       },
@@ -820,7 +923,7 @@ describe("GoogleSheetRepository", () => {
     expect(googleapisMock.appendCalls).toEqual([
       {
         spreadsheetId: "spreadsheet-id",
-        range: "'실행 기록'!A:H",
+        range: "'실행 기록'!A:K",
         valueInputOption: "RAW",
         insertDataOption: "INSERT_ROWS",
         requestBody: {
@@ -829,6 +932,9 @@ describe("GoogleSheetRepository", () => {
               "2026-07-09T00:00:00.000Z",
               "2026-07-09T00:01:00.000Z",
               "실제 연동",
+              "전체 스토어",
+              "동부트럭 (store-east), 서부트럭 (store-west)",
+              5,
               5,
               4,
               1,
@@ -845,18 +951,33 @@ describe("GoogleSheetRepository", () => {
     googleapisMock.queueGetValues([]);
     googleapisMock.queueGetValues([
       RUN_LOG_HEADERS,
-      ["2026-07-09T00:00:00.000Z", "2026-07-09T00:01:00.000Z", "실제 연동", 5, 4, 1, 3, "첫 실행"],
+      [
+        "2026-07-09T00:00:00.000Z",
+        "2026-07-09T00:01:00.000Z",
+        "실제 연동",
+        "전체 스토어",
+        "동부트럭 (store-east), 서부트럭 (store-west)",
+        5,
+        5,
+        4,
+        1,
+        3,
+        "첫 실행",
+      ],
     ]);
     const repository = await createRepository();
     const firstRun: RunLogRow = {
       runStartedAt: "2026-07-09T00:00:00.000Z",
       runFinishedAt: "2026-07-09T00:01:00.000Z",
       mode: "live",
-      totalProducts: 5,
-      successCount: 4,
-      failureCount: 1,
-      duplicateCount: 3,
-      message: "첫 실행",
+      syncScope: "all_stores",
+      selectedStores: [STORE_A_DISPLAY_NAME, STORE_B_DISPLAY_NAME],
+      syncedProductsThisRun: 5,
+      sheetTotalProducts: 5,
+      sheetExtractionSuccess: 4,
+      sheetExtractionFailure: 1,
+      sheetDuplicateProductRows: 3,
+      summary: "첫 실행",
     };
 
     await repository.appendRunLog(firstRun);
@@ -864,7 +985,7 @@ describe("GoogleSheetRepository", () => {
       ...firstRun,
       runStartedAt: "2026-07-09T00:05:00.000Z",
       runFinishedAt: "2026-07-09T00:06:00.000Z",
-      message: "두 번째 실행",
+      summary: "두 번째 실행",
     });
 
     const requests = googleapisMock.batchUpdateCalls.flatMap(
@@ -882,11 +1003,213 @@ describe("GoogleSheetRepository", () => {
           startRowIndex: 0,
           endRowIndex: 3,
           startColumnIndex: 0,
-          endColumnIndex: 8,
+          endColumnIndex: 11,
         },
       },
       fields: "range,columnProperties,rowsProperties",
     });
+  });
+
+  it("migrates exact legacy run-log headers without relabeling legacy rows", async () => {
+    googleapisMock.queueGetValues([
+      [...LEGACY_RUN_LOG_HEADERS],
+      [
+        "2026-07-08T00:00:00.000Z",
+        "2026-07-08T00:01:00.000Z",
+        "모의 실행",
+        8,
+        6,
+        2,
+        4,
+        "기존 실행",
+      ],
+    ]);
+    const repository = await createRepository();
+
+    await repository.appendRunLog({
+      runStartedAt: "2026-07-09T00:00:00.000Z",
+      runFinishedAt: "2026-07-09T00:01:00.000Z",
+      mode: "mock",
+      syncScope: "selected_stores",
+      selectedStores: [STORE_A_DISPLAY_NAME],
+      syncedProductsThisRun: 3,
+      sheetTotalProducts: 4,
+      sheetExtractionSuccess: 3,
+      sheetExtractionFailure: 1,
+      sheetDuplicateProductRows: 2,
+      summary: "선택 실행",
+    });
+
+    expect(googleapisMock.updateCalls).toContainEqual({
+      spreadsheetId: "spreadsheet-id",
+      range: "'실행 기록'!A1:K2",
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [
+          RUN_LOG_HEADERS,
+          [
+            "2026-07-08T00:00:00.000Z",
+            "2026-07-08T00:01:00.000Z",
+            "모의 실행",
+            "이전 형식",
+            "",
+            "",
+            8,
+            6,
+            2,
+            4,
+            "기존 실행",
+          ],
+        ],
+      },
+    });
+    expect(googleapisMock.appendCalls[0]?.requestBody?.values).toEqual([
+      [
+        "2026-07-09T00:00:00.000Z",
+        "2026-07-09T00:01:00.000Z",
+        "모의 실행",
+        "선택 스토어",
+        "동부트럭 (store-east)",
+        3,
+        4,
+        3,
+        1,
+        2,
+        "선택 실행",
+      ],
+    ]);
+  });
+
+  it("rejects legacy run-log rows with non-empty I:K cells before updating or appending", async () => {
+    googleapisMock.queueGetValues([
+      [...LEGACY_RUN_LOG_HEADERS],
+      [
+        "2026-07-08T00:00:00.000Z",
+        "2026-07-08T00:01:00.000Z",
+        "모의 실행",
+        8,
+        6,
+        2,
+        4,
+        "기존 실행",
+        "보존해야 하는 값",
+      ],
+    ]);
+    const repository = await createRepository();
+
+    await expect(repository.prepareRunLog()).rejects.toThrow(
+      "실행 기록 기존 8열 데이터의 I:K 영역에 값이 있어 자동 마이그레이션할 수 없습니다",
+    );
+
+    expect(googleapisMock.updateCalls).toEqual([]);
+    expect(googleapisMock.appendCalls).toEqual([]);
+  });
+
+  it("preserves fully blank rows while migrating the legacy run log", async () => {
+    googleapisMock.queueGetValues([
+      [...LEGACY_RUN_LOG_HEADERS],
+      ["2026-07-08T00:00:00.000Z", "2026-07-08T00:01:00.000Z", "모의 실행", 8, 6, 2, 4, "첫 실행"],
+      [],
+      [
+        "2026-07-08T00:05:00.000Z",
+        "2026-07-08T00:06:00.000Z",
+        "모의 실행",
+        9,
+        7,
+        2,
+        5,
+        "두 번째 실행",
+      ],
+    ]);
+    const repository = await createRepository();
+
+    await repository.prepareRunLog();
+
+    expect(googleapisMock.updateCalls).toContainEqual({
+      spreadsheetId: "spreadsheet-id",
+      range: "'실행 기록'!A1:K4",
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [
+          RUN_LOG_HEADERS,
+          [
+            "2026-07-08T00:00:00.000Z",
+            "2026-07-08T00:01:00.000Z",
+            "모의 실행",
+            "이전 형식",
+            "",
+            "",
+            8,
+            6,
+            2,
+            4,
+            "첫 실행",
+          ],
+          Array.from({ length: RUN_LOG_HEADERS.length }, () => ""),
+          [
+            "2026-07-08T00:05:00.000Z",
+            "2026-07-08T00:06:00.000Z",
+            "모의 실행",
+            "이전 형식",
+            "",
+            "",
+            9,
+            7,
+            2,
+            5,
+            "두 번째 실행",
+          ],
+        ],
+      },
+    });
+    expect(googleapisMock.appendCalls).toEqual([]);
+  });
+
+  it("rejects an unknown non-empty run-log header without value writes", async () => {
+    googleapisMock.queueGetValues([
+      [
+        "실행 시작일시",
+        "실행 종료일시",
+        "실행 모드",
+        "알 수 없는 상품 수",
+        "알 수 없는 성공 수",
+        "알 수 없는 실패 수",
+        "알 수 없는 중복 수",
+        "실행 결과",
+      ],
+      [
+        "2026-07-08T00:00:00.000Z",
+        "2026-07-08T00:01:00.000Z",
+        "모의 실행",
+        8,
+        6,
+        2,
+        4,
+        "기존 실행",
+      ],
+    ]);
+    const repository = await createRepository();
+
+    await expect(
+      repository.appendRunLog({
+        runStartedAt: "2026-07-09T00:00:00.000Z",
+        runFinishedAt: "2026-07-09T00:01:00.000Z",
+        mode: "mock",
+        syncScope: "selected_stores",
+        selectedStores: [STORE_A_DISPLAY_NAME],
+        syncedProductsThisRun: 3,
+        sheetTotalProducts: 4,
+        sheetExtractionSuccess: 3,
+        sheetExtractionFailure: 1,
+        sheetDuplicateProductRows: 2,
+        summary: "선택 실행",
+      }),
+    ).rejects.toThrow(
+      "실행 기록 헤더가 지원되지 않는 형식입니다. 빈 시트, 기존 8열 헤더, 현재 11열 헤더만 사용할 수 있습니다",
+    );
+
+    expect(googleapisMock.updateCalls).toEqual([]);
+    expect(googleapisMock.appendCalls).toEqual([]);
   });
 
   it("uses a credentials file when one is configured", async () => {

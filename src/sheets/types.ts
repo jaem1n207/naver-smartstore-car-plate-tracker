@@ -29,14 +29,20 @@ export type RunLogRow = {
   runStartedAt: string;
   runFinishedAt: string;
   mode: "mock" | "live";
-  totalProducts: number;
-  successCount: number;
-  failureCount: number;
-  duplicateCount: number;
-  message: string;
+  syncScope: SyncScope;
+  selectedStores: readonly string[];
+  syncedProductsThisRun: number;
+  sheetTotalProducts: number;
+  sheetExtractionSuccess: number;
+  sheetExtractionFailure: number;
+  sheetDuplicateProductRows: number;
+  summary: string;
 };
 
+export type SyncScope = "all_stores" | "selected_stores";
+
 export type SheetRepository = {
+  prepareRunLog(): Promise<void>;
   readRawData(): Promise<SheetProductRow[]>;
   writeRawData(rows: SheetProductRow[]): Promise<void>;
   writeViews(rows: SheetProductRow[]): Promise<void>;

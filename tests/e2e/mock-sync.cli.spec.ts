@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 
 const execFileAsync = promisify(execFile);
 
-test("mock sync CLI exits successfully", async () => {
+test("mock sync CLI emits explicit full-store result JSON", async () => {
   const { stdout, stderr } = await execFileAsync(
     "node",
     ["--import", "tsx", "src/cli/sync-once.ts"],
@@ -17,9 +17,18 @@ test("mock sync CLI exits successfully", async () => {
   expect(stderr).toBe("");
   expect(stdout).not.toContain("store-a-secret");
   expect(stdout).not.toContain("store-b-secret");
+  expectSyncLog(stdout, {
+    syncScope: "all_stores",
+    selectedStores: ["Store A (store-a)", "Store B (store-b)"],
+    syncedProductsThisRun: 5,
+    sheetTotalProducts: 5,
+    sheetExtractionSuccess: 4,
+    sheetExtractionFailure: 1,
+    sheetDuplicateProductRows: 3,
+  });
 });
 
-test("mock sync CLI accepts a Smartstore URL slug", async () => {
+test("mock sync CLI emits explicit selected-store result JSON for a Smartstore URL slug", async () => {
   const { stdout, stderr } = await execFileAsync(
     "node",
     ["--import", "tsx", "src/cli/sync-once.ts", "--store=store-a"],
@@ -32,7 +41,40 @@ test("mock sync CLI accepts a Smartstore URL slug", async () => {
   expect(stderr).toBe("");
   expect(stdout).not.toContain("store-a-secret");
   expect(stdout).not.toContain("store-b-secret");
+  expectSyncLog(stdout, {
+    syncScope: "selected_stores",
+    selectedStores: ["Store A (store-a)"],
+    syncedProductsThisRun: 3,
+    sheetTotalProducts: 3,
+    sheetExtractionSuccess: 2,
+    sheetExtractionFailure: 1,
+    sheetDuplicateProductRows: 2,
+  });
 });
+
+function expectSyncLog(stdout: string, expected: Record<string, unknown>): void {
+  const logs = stdout
+    .trim()
+    .split("\n")
+    .map((line) => {
+      const parsed: unknown = JSON.parse(line);
+
+      return parsed;
+    })
+    .filter(isRecord);
+  const syncLog = logs.find((log) => log.msg === "sync completed");
+
+  expect(syncLog).toBeDefined();
+  expect(syncLog).toMatchObject(expected);
+  expect(syncLog).not.toHaveProperty("totalProducts");
+  expect(syncLog).not.toHaveProperty("successCount");
+  expect(syncLog).not.toHaveProperty("failureCount");
+  expect(syncLog).not.toHaveProperty("duplicateCount");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
 function cliEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
@@ -43,7 +85,7 @@ function cliEnv(): NodeJS.ProcessEnv {
     ...env,
     NODE_ENV: "test",
     TZ: "Asia/Seoul",
-    LOG_LEVEL: "silent",
+    LOG_LEVEL: "info",
     NAVER_API_MODE: "mock",
     ALLOW_LIVE_NAVER_API: "false",
     NAVER_API_BASE_URL: "https://api.commerce.naver.com/external",
