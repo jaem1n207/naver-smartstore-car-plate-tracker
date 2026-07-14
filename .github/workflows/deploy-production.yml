@@ -1,0 +1,155 @@
+name: Production Deployment
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Reject non-main manual ref
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Manual production deployment is restricted to main."
+          exit 1
+
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Validate shell syntax
+        run: bash -n ops/deployment/*.sh ops/deployment/lib/*.sh
+
+      - name: Run actionlint
+        uses: reviewdog/action-actionlint@6fb7acc99f4a1008869fa8a0f09cfca740837d9d
+        with:
+          reporter: local
+          fail_level: error
+
+      - name: Run shellcheck
+        uses: reviewdog/action-shellcheck@4c07458293ac342d477251099501a718ae5ef86e
+        with:
+          reporter: local
+          fail_level: error
+          path: ops/deployment
+          pattern: "*.sh"
+
+      - name: Run complete test suite
+        run: pnpm test:all
+
+      - name: Build production JavaScript
+        run: pnpm build
+
+      - name: Verify generated visual CSS
+        run: git diff --exit-code -- tests/visual/fixtures/sheets-view.css
+
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: playwright-diagnostics-${{ runner.os }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  deploy:
+    name: Deploy production
+    needs: verify
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: production
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Request production deployment
+        env:
+          DEPLOY_HOST: ${{ secrets.OCI_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.OCI_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.OCI_DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.OCI_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+
+          ssh_directory="${RUNNER_TEMP}/deploy-ssh"
+          key_file="${ssh_directory}/deploy-key"
+          known_hosts_file="${ssh_directory}/known-hosts"
+          install -d -m 0700 "${ssh_directory}"
+          trap 'rm -f "${key_file}" "${known_hosts_file}"' EXIT
+          umask 077
+          printf '%s\n' "${DEPLOY_KEY}" >"${key_file}"
+          printf '%s\n' "${DEPLOY_KNOWN_HOSTS}" >"${known_hosts_file}"
+          chmod 0600 "${key_file}" "${known_hosts_file}"
+
+          set +e
+          result="$(
+            timeout 110m ssh \
+              -i "${key_file}" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="${known_hosts_file}" \
+              -o ConnectTimeout=15 \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=6 \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "deploy ${GITHUB_SHA}" 2>/dev/null
+          )"
+          status=$?
+          set -e
+
+          if [[ "${result}" == *$'\n'* ]]; then
+            echo "::error::Deployment returned an invalid response."
+            exit 1
+          fi
+
+          if ! sanitized_result="$(
+            printf '%s' "${result}" | jq -ce '
+              if (
+                type == "object" and
+                keys == ["activatedSha", "diagnosticId", "outcome", "previousSha", "requestedSha"] and
+                all(.[]; type == "string")
+              ) then
+                {outcome, requestedSha, previousSha, activatedSha, diagnosticId}
+              else
+                error("invalid deployment response")
+              end
+            ' 2>/dev/null
+          )"; then
+            echo "::error::Deployment returned an invalid response."
+            exit 1
+          fi
+
+          printf '%s\n' "${sanitized_result}"
+          exit "${status}"
