@@ -225,6 +225,33 @@ describe("LiveNaverCommerceClient", () => {
     );
   });
 
+  it("accepts totalPages zero as a valid empty search result", async () => {
+    const queuedFetch = createQueuedFetch([
+      tokenResponse("access-token"),
+      searchResponse({ contents: [], totalPages: 0 }),
+    ]);
+    const client = new LiveNaverCommerceClient({
+      baseUrl: "https://api.example.com",
+      fetchImpl: queuedFetch.fetchImpl,
+    });
+
+    await expect(client.searchProducts(store)).resolves.toEqual([]);
+    expect(queuedFetch.calls).toHaveLength(2);
+  });
+
+  it.each([-1, 1.5, "invalid"])("rejects invalid totalPages value %s", async (totalPages) => {
+    const queuedFetch = createQueuedFetch([
+      tokenResponse("access-token"),
+      searchResponse({ contents: [], totalPages }),
+    ]);
+    const client = new LiveNaverCommerceClient({
+      baseUrl: "https://api.example.com",
+      fetchImpl: queuedFetch.fetchImpl,
+    });
+
+    await expect(client.searchProducts(store)).rejects.toThrow(/totalPages/);
+  });
+
   it("fails closed when detail content is missing", async () => {
     const queuedFetch = createQueuedFetch([
       tokenResponse("access-token"),

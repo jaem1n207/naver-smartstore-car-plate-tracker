@@ -37,7 +37,7 @@ const ProductSearchResponseSchema = z.object({
     }),
   ),
   last: z.boolean().optional(),
-  totalPages: z.number().int().positive().optional(),
+  totalPages: z.number().int().nonnegative().optional(),
 });
 
 type ProductSearchResponse = z.infer<typeof ProductSearchResponseSchema>;
