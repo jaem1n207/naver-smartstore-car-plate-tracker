@@ -223,6 +223,23 @@ describe("deployment isolation contract", () => {
     );
   });
 
+  it("trusts only the configured initial checkout when Git detects different ownership", async () => {
+    const fixture = await createBootstrapFixture();
+
+    const result = await runBootstrap(fixture, {
+      CARPLATE_TEST_DUBIOUS_INITIAL_SOURCE: "1",
+    });
+
+    expect(result.code, result.stderr).toBe(0);
+    const commands = await readCommands(fixture.commandLog);
+    expect(commands).toContain(
+      `git -c safe.directory=${fixture.initialReleaseSource} -C ${fixture.initialReleaseSource} rev-parse --show-toplevel`,
+    );
+    expect(commands).toContain(
+      `git -c safe.directory=${fixture.initialReleaseSource} -C ${fixture.initialReleaseSource} rev-parse --verify HEAD^{commit}`,
+    );
+  }, 15_000);
+
   it("rejects a reviewed source beneath a group-writable ancestor", async () => {
     const fixture = await createBootstrapFixture();
     await chmod(fixture.temporaryDirectory, 0o770);
@@ -710,6 +727,15 @@ case "$(basename "$0")" in
     printf '{"level":30,"cron":"%s","mode":"%s","appRevision":"%s","msg":"scheduler started"}\\n' \
       "$cron" "$mode" "$revision"
     ;;
+  git)
+    if [[ ${shellDollar}{CARPLATE_TEST_DUBIOUS_INITIAL_SOURCE:-} == 1 && " $* " == *" -C ${shellDollar}CARPLATE_INITIAL_RELEASE_SOURCE "* ]]; then
+      [[ " $* " == *" -c safe.directory=${shellDollar}CARPLATE_INITIAL_RELEASE_SOURCE "* ]] || {
+        printf '%s\\n' "fatal: detected dubious ownership in repository at '${shellDollar}CARPLATE_INITIAL_RELEASE_SOURCE'" >&2
+        exit 128
+      }
+    fi
+    /usr/bin/git "$@"
+    ;;
   passwd|visudo|chown)
     ;;
   sshd)
@@ -753,6 +779,7 @@ esac
       "sshd",
       "install",
       "chown",
+      "git",
     ].map(async (command) => {
       const path = join(directory, command);
       await writeFile(path, shim, { mode: 0o700 });
@@ -760,7 +787,10 @@ esac
   );
 }
 
-async function runBootstrap(fixture: BootstrapFixture): Promise<ProcessResult> {
+async function runBootstrap(
+  fixture: BootstrapFixture,
+  environmentOverrides: NodeJS.ProcessEnv = {},
+): Promise<ProcessResult> {
   const environment = {
     ...process.env,
     CARPLATE_APP_ROOT: fixture.appRoot,
@@ -781,6 +811,7 @@ async function runBootstrap(fixture: BootstrapFixture): Promise<ProcessResult> {
     CARPLATE_TEST_MODE: "1",
     CARPLATE_TEST_SOURCE_TRUST_ROOT: fixture.temporaryDirectory,
     CARPLATE_REVIEWED_SCRIPT_DIR: fixture.reviewedScriptDirectory,
+    ...environmentOverrides,
   };
   return await runProcess("bash", [bootstrapScript], environment);
 }

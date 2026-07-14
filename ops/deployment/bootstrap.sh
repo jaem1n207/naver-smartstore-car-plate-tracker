@@ -415,7 +415,8 @@ validate_initial_source() {
       die 'initial release lockfile must be a regular file'
   fi
 
-  git_root=$(git -C "$INITIAL_RELEASE_SOURCE" rev-parse --show-toplevel 2>/dev/null) ||
+  git_root=$(git -c "safe.directory=$INITIAL_RELEASE_SOURCE" -C "$INITIAL_RELEASE_SOURCE" \
+    rev-parse --show-toplevel 2>/dev/null) ||
     die 'initial release source must be a Git checkout'
   git_root=$(cd -- "$git_root" && pwd -P) || die 'cannot resolve initial release Git root'
   [[ $git_root == "$INITIAL_RELEASE_SOURCE" ]] ||
@@ -424,7 +425,8 @@ validate_initial_source() {
 
 initial_source_sha() {
   local sha
-  sha=$(git -C "$INITIAL_RELEASE_SOURCE" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) ||
+  sha=$(git -c "safe.directory=$INITIAL_RELEASE_SOURCE" -C "$INITIAL_RELEASE_SOURCE" \
+    rev-parse --verify 'HEAD^{commit}' 2>/dev/null) ||
     return 1
   [[ $sha =~ ^[0-9a-f]{40}$ ]] || return 1
   printf '%s\n' "$sha"
