@@ -196,6 +196,18 @@ describe("production deployment workflow", () => {
     });
     expect(String(diagnostics?.with?.path)).toContain("playwright-report");
     expect(String(diagnostics?.with?.path)).toContain("test-results");
+
+    for (const staticAnalysisStep of verify.steps.filter(
+      (step) =>
+        step.uses?.startsWith("reviewdog/action-actionlint@") === true ||
+        step.uses?.startsWith("reviewdog/action-shellcheck@") === true,
+    )) {
+      expect(staticAnalysisStep.with).toMatchObject({
+        fail_level: "error",
+        filter_mode: "nofilter",
+        reporter: "local",
+      });
+    }
   });
 
   it("uses only deploy credentials and sends one strict bounded forced command", async () => {
@@ -214,6 +226,8 @@ describe("production deployment workflow", () => {
     expect(request.run).toContain("-o StrictHostKeyChecking=yes");
     expect(request.run).toContain("-o UserKnownHostsFile=");
     expect(request.run).toContain("-o ConnectTimeout=15");
+    expect(request.run).toContain('[[ "${DEPLOY_USER}" != carplate-deploy');
+    expect(request.run).toContain('"${GITHUB_SHA}" =~ ^[0-9a-f]{40}$');
     expect(request.run).toContain('"deploy ${GITHUB_SHA}"');
     expect(request.run?.match(/"deploy \$\{GITHUB_SHA\}"/gu)).toHaveLength(1);
     expect(request.run).toContain(

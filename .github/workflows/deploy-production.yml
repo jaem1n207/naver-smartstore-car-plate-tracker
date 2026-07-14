@@ -50,12 +50,14 @@ jobs:
         uses: reviewdog/action-actionlint@6fb7acc99f4a1008869fa8a0f09cfca740837d9d
         with:
           reporter: local
+          filter_mode: nofilter
           fail_level: error
 
       - name: Run shellcheck
         uses: reviewdog/action-shellcheck@4c07458293ac342d477251099501a718ae5ef86e
         with:
           reporter: local
+          filter_mode: nofilter
           fail_level: error
           path: ops/deployment
           pattern: "*.sh"
@@ -101,6 +103,15 @@ jobs:
           DEPLOY_KNOWN_HOSTS: ${{ secrets.OCI_DEPLOY_KNOWN_HOSTS }}
         run: |
           set -Eeuo pipefail
+
+          if [[ "${DEPLOY_USER}" != carplate-deploy || ! "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Deployment identity or revision is invalid."
+            exit 1
+          fi
+          if [[ -z "${DEPLOY_HOST}" || -z "${DEPLOY_KEY}" || -z "${DEPLOY_KNOWN_HOSTS}" ]]; then
+            echo "::error::Production deployment credentials are incomplete."
+            exit 1
+          fi
 
           ssh_directory="${RUNNER_TEMP}/deploy-ssh"
           key_file="${ssh_directory}/deploy-key"
