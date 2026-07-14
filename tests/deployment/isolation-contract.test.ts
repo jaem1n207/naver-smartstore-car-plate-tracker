@@ -31,6 +31,17 @@ afterEach(async () => {
 });
 
 describe("deployment isolation contract", () => {
+  it("creates a trusted bootstrap fixture under a group-writable caller umask", async () => {
+    const previousUmask = process.umask(0o002);
+    const fixture = await createBootstrapFixture().finally(() => {
+      process.umask(previousUmask);
+    });
+
+    const result = await runBootstrap(fixture);
+
+    expect(result.code, result.stderr).toBe(0);
+  }, 15_000);
+
   it("installs only separated accounts, root-controlled state, and constrained SSH access", async () => {
     const fixture = await createBootstrapFixture();
     const candidate = join(fixture.appRoot, "candidates", fixture.initialRevision);
@@ -447,8 +458,8 @@ async function createBootstrapFixture(
   const sudoersFile = join(sudoersDirectory, "carplate-deploy");
 
   await Promise.all([
-    mkdir(reviewedScriptDirectory, { recursive: true }),
-    mkdir(join(reviewedScriptDirectory, "lib"), { recursive: true }),
+    mkdir(reviewedScriptDirectory, { recursive: true, mode: 0o700 }),
+    mkdir(join(reviewedScriptDirectory, "lib"), { recursive: true, mode: 0o700 }),
     mkdir(shimDirectory, { recursive: true }),
     mkdir(accountStateDirectory, { recursive: true }),
     writeFile(
