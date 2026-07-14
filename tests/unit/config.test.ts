@@ -27,6 +27,13 @@ describe("loadEnv", () => {
 
     expect(env.naverApiMode).toBe("mock");
     expect(env.allowLiveNaverApi).toBe(false);
+    expect(env.appRevision).toBe("local");
+  });
+
+  it("loads a trimmed application revision", () => {
+    const env = loadEnv({ ...baseEnv, APP_REVISION: " revision-123 " });
+
+    expect(env.appRevision).toBe("revision-123");
   });
 
   it("rejects live mode unless explicitly allowed", () => {

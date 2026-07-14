@@ -15,6 +15,7 @@ const EnvSchema = z.object({
   NAVER_API_BASE_URL: z.url().default("https://api.commerce.naver.com/external"),
   SYNC_CRON: z.string().default("*/5 * * * *"),
   SYNC_LOCK_DIR: z.string().trim().min(1).default(".runtime/sync.lock"),
+  APP_REVISION: z.string().trim().min(1).default("local"),
   STORE_A_NAME: RequiredText,
   STORE_A_BASE_URL: z.url(),
   STORE_A_CLIENT_ID: RequiredText,
@@ -39,6 +40,7 @@ export interface AppEnv {
   readonly naverApiBaseUrl: string;
   readonly syncCron: string;
   readonly syncLockDir: string;
+  readonly appRevision: string;
   readonly storeAName: string;
   readonly storeABaseUrl: string;
   readonly storeAClientId: string;
@@ -79,6 +81,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
     naverApiBaseUrl: raw.NAVER_API_BASE_URL,
     syncCron: raw.SYNC_CRON,
     syncLockDir: raw.SYNC_LOCK_DIR,
+    appRevision: raw.APP_REVISION,
     storeAName: raw.STORE_A_NAME,
     storeABaseUrl: raw.STORE_A_BASE_URL,
     storeAClientId: raw.STORE_A_CLIENT_ID,
