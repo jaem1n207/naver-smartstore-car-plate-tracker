@@ -6,7 +6,7 @@
 - Google service-account credentials authenticate the worker and must have Editor access only to the target spreadsheet.
 - Product detail HTML is untrusted input. It is parsed as text and is never executed.
 - Google Sheets is both the operator UI and persisted sync state. Only `관리자 메모` is operator-owned during upsert.
-- Pull-request code is untrusted for production. A PR runs verification only; deployment requires a verified `main` revision.
+- Pull-request code is untrusted for routine production. A PR runs verification only; routine deployment requires a verified `main` revision. The initial PR #2 bootstrap is a one-time migration exception because it seeds the ancestry marker before merge; it is allowed only after the PR `Verify` job, independent code/security/operator reviews, and explicit user approval all pass for the exact head SHA.
 - Repository and dependency code is untrusted during release preparation. It builds as `carplate-build` without production credentials, root access, or runtime ownership.
 - A GitHub deployment credential can request only `deploy <40-lowercase-hex-sha>` through a forced SSH command. The root deployer independently verifies identity, revision ancestry, fixed origin, layout, resources, and locks.
 - Installed deployment scripts, systemd units, SSH policy, sudoers, `/etc` secrets, and root deployment state are privileged maintenance assets. Routine application deployment cannot update them.
@@ -14,8 +14,8 @@
 ## Account separation
 
 - `carplate` runs compiled production JavaScript. It can read `app.env` and the Google key and can write only `/var/lib/naver-smartstore-car-plate-tracker/runtime`.
-- `carplate-build` installs and builds candidates inside a bounded transient systemd unit. It cannot read production credentials and has no sudo permission.
-- `carplate-deploy` has a locked password and a shell only because OpenSSH must invoke the forced command. Root-owned SSH restrictions disable caller-selected commands, TTY, forwarding, user rc, and password or keyboard-interactive authentication.
+- `carplate-build` fetches registry packages with lifecycle scripts disabled and private, loopback, and link-local destinations denied, then installs and builds offline in a private-network transient systemd unit. It cannot read production credentials and has no sudo permission.
+- `carplate-deploy` has a locked password and a shell only because OpenSSH must invoke the forced command. Both the account policy and the authorized-key line force the same entrypoint; root-owned SSH restrictions disable caller-selected commands, TTY, forwarding, user rc, alternate authorized-key commands or user CAs, and password or keyboard-interactive authentication.
 - The personal Oracle maintenance account remains separate from all three service accounts and keeps the only general incident-recovery path.
 - Root owns the bare Git mirror, immutable releases, symlinks, deploy state, forced-command programs, systemd units, authorized key, SSH drop-in, and sudoers rule.
 
@@ -36,22 +36,23 @@ GitHub receives only four production environment secrets: `OCI_DEPLOY_HOST`, `OC
 
 - GitHub Actions has `contents: read`; only the deploy job can access the `production` environment.
 - Pull requests never deploy, `workflow_dispatch` rejects non-`main` refs, and a failed `Verify` job blocks deployment.
-- Reusable actions are pinned to full commit SHAs. Dependabot proposes reviewed GitHub Actions pin updates.
-- Server deployment fetches only the compiled-in public HTTPS origin and permits initial `origin/main` head or a forward descendant of the durable deployed SHA.
+- Reusable actions are pinned to full commit SHAs. `actionlint` and `shellcheck` are downloaded from their official versioned releases and accepted only after fixed SHA-256 verification. Dependabot proposes reviewed GitHub Actions pin updates.
+- Server deployment fetches only the compiled-in public HTTPS origin and activates only the exact current `origin/main` tip when it is a forward descendant of the durable deployed SHA. It refreshes the tip again immediately before writing activation state; an older request becomes `superseded` without activation.
 - Bootstrap rejects an initial checkout that equals or is nested inside `/opt/naver-smartstore-car-plate-tracker`; the source checkout, `.git`, `.env`, and Google key must remain outside the managed application tree.
 - PR #2 must use a merge commit because bootstrap records its head as `deployed-sha`. Squash or rebase merge would make the first `main` request divergent and is therefore prohibited for this migration.
 - Equal and stale requests are successful no-ops. Divergent history, including a force-pushed `main`, fails closed.
-- Build lifecycle scripts run in a bounded cgroup. Activation rejects surviving descendants, inherited writable descriptors, escaping links, special files, unsafe ACLs or extended attributes, and mutable release content.
-- Root copies validated candidate content into new root-owned inodes, creates a non-secret `release.env`, and retains only current and previous known-good releases.
+- Dependency download runs with lifecycle scripts disabled. Lifecycle scripts and the production build run only from the fetched lockfile cache, with no network, in a bounded cgroup with memory, swap, task, runtime, per-file, and private temporary-filesystem limits. The host filesystem still has no per-build aggregate project quota, so disk preflight and host disk monitoring remain required.
+- Activation rejects surviving descendants, inherited writable descriptors, escaping links, special files, unsafe ACLs or extended attributes, and mutable release content.
+- Bootstrap accepts privileged sources only when the complete path from `/` is root-owned and not group/other writable. Root copies validated candidate content into new root-owned inodes, creates a non-secret `release.env`, and retains only current and previous known-good releases.
 
 ## Locks, shutdown, and crash recovery
 
 - Scheduler and compiled `sync:once` processes share `/var/lib/naver-smartstore-car-plate-tracker/runtime/sync.lock`.
 - The root deployer takes a separate deployment flock, drains the scheduler with `SIGTERM`, then holds the sync lock through activation or recovery.
-- Lock ownership includes PID, Linux process start ticks, and a random token. Unknown or malformed state fails closed; operators must not delete locks by hand.
-- Before changing `current`, deployment fsyncs a root-only pending activation state. It commits `deployed-sha` only after invocation-scoped health succeeds.
+- Lock ownership includes PID, Linux process start ticks, and a random token. An entirely empty lock directory left before owner publication is reclaimable only after 60 seconds; active, fresh, malformed, or unexpected state fails closed. Operators must not delete locks by hand.
+- Before changing `current`, deployment fsyncs a root-only pending activation state containing the candidate, current known-good release, and the older `previous` release. A failed A/B/C activation restores both known-good links. It commits `deployed-sha` only after invocation-scoped health succeeds, clears the pending journal before pruning, and therefore never removes a release still required by durable recovery state.
 - `car-plate-tracker-recover.service` runs before the scheduler on every boot. Pending activation or marker/link disagreement restores the durable known-good release before credentials are read by the runtime.
-- Health requires a new systemd invocation, `scheduler started`, `mode: live`, expected cron, expected `APP_REVISION`, stable PID, unchanged restart count, and 15 seconds of `active/running` state.
+- Deployment health requires a new systemd invocation, `scheduler started`, `mode: live`, expected cron, expected `APP_REVISION`, stable PID, unchanged restart count, and 15 seconds of `active/running` state. Bootstrap applies the same startup-record contract and a bounded five-second stable invocation/restart check.
 
 ## Public log policy
 

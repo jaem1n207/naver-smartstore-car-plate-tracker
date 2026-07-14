@@ -31,7 +31,7 @@ The repository pins Node.js `22.23.1` in `.node-version` and pnpm `11.10.0` in `
 
 Use fixtures for local Naver data. Automated tests must never call the live Naver Commerce API or write the production Google Sheet. The fixed-IP live smoke test is the only path for real Naver and Google verification.
 
-Every process-level test gets its own temporary `SYNC_LOCK_DIR`. Lock tests cover active-owner contention, verified stale-owner recovery, PID reuse, malformed owner state, and token-safe release. Scheduler tests cover graceful `SIGTERM` drain and compiled runtime startup.
+Every process-level test gets its own temporary `SYNC_LOCK_DIR`. Lock tests cover active-owner contention, verified stale-owner recovery, PID reuse, a crash before owner publication, malformed owner state, and token-safe release. Scheduler tests cover graceful `SIGTERM` drain and compiled runtime startup.
 
 ## Google Sheets behavior
 
@@ -64,7 +64,7 @@ Do not use the MacBook to overwrite Linux snapshots. Use the CI artifact or the 
 - shared sync locking and deployment flock contention;
 - secretless transient builds and immutable sealing;
 - bootstrap rejection when the initial checkout equals or is nested inside the managed `/opt` application root;
-- candidate failure restart and activation rollback;
+- candidate failure restart, A/B/C two-release preservation, and activation rollback;
 - invocation-scoped health and restart-count checks;
 - crash-consistent recovery at every activation transition;
 - escaping links, special files, unsafe metadata, surviving children, and writable-descriptor rejection;
@@ -80,7 +80,7 @@ pnpm vitest run tests/deployment/deployer.integration.test.ts -t "rolls back act
 pnpm vitest run tests/deployment/recovery.test.ts
 ```
 
-Shell syntax is part of the local contract. `actionlint` and `shellcheck` run as pinned GitHub Actions and remain authoritative on Linux when those tools are not installed locally.
+Shell syntax is part of the local contract. CI downloads versioned `actionlint` and `shellcheck` binaries from their official releases, verifies fixed SHA-256 digests, and runs them directly. Those Linux checks remain authoritative when the tools are not installed locally.
 
 **[MacBook]**
 
