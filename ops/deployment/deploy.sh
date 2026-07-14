@@ -92,6 +92,8 @@ _deploy_reset_runtime_state() {
   DEPLOY_RESULT_EMITTED=0
   DEPLOY_BUILD_CANDIDATE=
   DEPLOY_BUILD_PACKAGE_STORE=
+  DEPLOY_BUILD_ARCHIVE=
+  DEPLOY_TEMPORARY_RELEASE=
 }
 
 _deploy_validate_layout() {
@@ -257,17 +259,19 @@ _deploy_export_candidate() {
   local archive=$DEPLOY_STATE_ROOT/.candidate.$DEPLOY_DIAGNOSTIC_ID.tar
 
   mkdir -p "$DEPLOY_APP_ROOT/package-store"
+  [[ -d $DEPLOY_APP_ROOT/package-store && ! -L $DEPLOY_APP_ROOT/package-store ]] || return 1
   _deploy_remove_direct_child "$DEPLOY_APP_ROOT/candidates" "$candidate" || return 1
   _deploy_remove_direct_child "$DEPLOY_APP_ROOT/package-store" "$package_store" || return 1
   mkdir -m 0755 "$candidate" "$package_store"
+  DEPLOY_BUILD_ARCHIVE=$archive
   git --git-dir="$DEPLOY_REPOSITORY" archive --format=tar "$sha" >"$archive" 2>/dev/null || return 1
   tar -xf "$archive" -C "$candidate" >/dev/null 2>&1 || return 1
   rm -f "$archive"
+  DEPLOY_BUILD_ARCHIVE=
 
   if [[ -n $DEPLOY_RELEASE_USER ]]; then
     chown -R "$DEPLOY_BUILD_USER:$DEPLOY_BUILD_USER" "$candidate" "$package_store" || return 1
   fi
-  printf '%s\n%s\n' "$candidate" "$package_store"
 }
 
 _deploy_run_isolated_build() {
@@ -361,6 +365,7 @@ _deploy_seal_release() {
   fi
 
   [[ ! -e $temporary_release && ! -L $temporary_release ]] || return 1
+  DEPLOY_TEMPORARY_RELEASE=$temporary_release
   mkdir -m 0700 "$temporary_release"
   COPYFILE_DISABLE=1 cp -R "$candidate/." "$temporary_release/" || return 1
   validate_candidate_tree "$temporary_release" || return 1
@@ -375,12 +380,12 @@ _deploy_seal_release() {
     chown -hR "$DEPLOY_RELEASE_USER:$DEPLOY_RELEASE_GROUP" "$temporary_release" || return 1
   fi
   mv "$temporary_release" "$final_release" || return 1
+  DEPLOY_TEMPORARY_RELEASE=
   _deploy_fsync_directory "$DEPLOY_APP_ROOT/releases"
 }
 
 _deploy_prepare_release() {
   local sha=$1
-  local paths
   local candidate
   local package_store
   local cgroup_name
@@ -395,11 +400,7 @@ _deploy_prepare_release() {
   cgroup_name=${DEPLOY_BUILD_CGROUP_NAME:-carplate-build-${sha}.service}
   DEPLOY_BUILD_CANDIDATE=$candidate
   DEPLOY_BUILD_PACKAGE_STORE=$package_store
-  if ! paths=$(_deploy_export_candidate "$sha"); then
-    _deploy_remove_build_workspace
-    return 1
-  fi
-  if [[ $paths != "$candidate"$'\n'"$package_store" ]]; then
+  if ! _deploy_export_candidate "$sha"; then
     _deploy_remove_build_workspace
     return 1
   fi
@@ -425,6 +426,99 @@ _deploy_remove_build_workspace() {
   _deploy_remove_direct_child "$DEPLOY_APP_ROOT/package-store" "$DEPLOY_BUILD_PACKAGE_STORE" || return 1
   DEPLOY_BUILD_CANDIDATE=
   DEPLOY_BUILD_PACKAGE_STORE=
+}
+
+_deploy_build_cgroup_name() {
+  local sha=$1
+  if [[ -n $DEPLOY_BUILD_CGROUP_NAME ]]; then
+    printf '%s\n' "$DEPLOY_BUILD_CGROUP_NAME"
+  else
+    printf 'carplate-build-%s.service\n' "$sha"
+  fi
+}
+
+_deploy_remove_candidate_archive() {
+  local archive=$1
+  local name=${archive##*/}
+  [[ $archive == "$DEPLOY_STATE_ROOT"/* \
+    && ${archive#"$DEPLOY_STATE_ROOT"/} != */* \
+    && $name =~ ^\.candidate\.[0-9a-f]{24}\.tar$ \
+    && -f $archive \
+    && ! -L $archive ]] || return 1
+  rm -f -- "$archive"
+}
+
+_deploy_remove_temporary_release() {
+  local release=$1
+  local name=${release##*/}
+  [[ $release == "$DEPLOY_APP_ROOT/releases"/* \
+    && ${release#"$DEPLOY_APP_ROOT/releases"/} != */* \
+    && $name =~ ^\.[0-9a-f]{40}\.[0-9a-f]{24}\.tmp$ \
+    && -d $release \
+    && ! -L $release ]] || return 1
+  find "$release" -type d -exec chmod u+w {} + >/dev/null 2>&1 || return 1
+  _deploy_remove_direct_child "$DEPLOY_APP_ROOT/releases" "$release"
+}
+
+_deploy_remove_controlled_temporary_paths() {
+  if [[ -n ${DEPLOY_BUILD_ARCHIVE:-} && ( -e $DEPLOY_BUILD_ARCHIVE || -L $DEPLOY_BUILD_ARCHIVE ) ]]; then
+    _deploy_remove_candidate_archive "$DEPLOY_BUILD_ARCHIVE" || return 1
+  fi
+  DEPLOY_BUILD_ARCHIVE=
+  if [[ -n ${DEPLOY_TEMPORARY_RELEASE:-} \
+    && ( -e $DEPLOY_TEMPORARY_RELEASE || -L $DEPLOY_TEMPORARY_RELEASE ) ]]; then
+    _deploy_remove_temporary_release "$DEPLOY_TEMPORARY_RELEASE" || return 1
+  fi
+  DEPLOY_TEMPORARY_RELEASE=
+}
+
+_deploy_cleanup_abandoned_paths() {
+  local path
+  local sha
+  local cgroup_name
+  local matching_store
+
+  shopt -s nullglob
+  for path in "$DEPLOY_APP_ROOT/candidates"/*; do
+    sha=${path##*/}
+    [[ $sha =~ ^[0-9a-f]{40}$ && -d $path && ! -L $path ]] || continue
+    cgroup_name=$(_deploy_build_cgroup_name "$sha") || return 1
+    _deploy_validate_quiescence "$path" "$cgroup_name" || return 1
+    matching_store=$DEPLOY_APP_ROOT/package-store/$sha
+    if [[ -e $matching_store || -L $matching_store ]]; then
+      [[ -d $matching_store && ! -L $matching_store ]] || return 1
+      _deploy_validate_quiescence "$matching_store" "$cgroup_name" || return 1
+      _deploy_remove_direct_child "$DEPLOY_APP_ROOT/package-store" "$matching_store" || return 1
+    fi
+    _deploy_remove_direct_child "$DEPLOY_APP_ROOT/candidates" "$path" || return 1
+  done
+
+  if [[ -e $DEPLOY_APP_ROOT/package-store || -L $DEPLOY_APP_ROOT/package-store ]]; then
+    [[ -d $DEPLOY_APP_ROOT/package-store && ! -L $DEPLOY_APP_ROOT/package-store ]] || return 1
+    for path in "$DEPLOY_APP_ROOT/package-store"/*; do
+      sha=${path##*/}
+      [[ $sha =~ ^[0-9a-f]{40}$ && -d $path && ! -L $path ]] || continue
+      cgroup_name=$(_deploy_build_cgroup_name "$sha") || return 1
+      _deploy_validate_quiescence "$path" "$cgroup_name" || return 1
+      _deploy_remove_direct_child "$DEPLOY_APP_ROOT/package-store" "$path" || return 1
+    done
+  fi
+
+  for path in "$DEPLOY_STATE_ROOT"/.candidate.*.tar; do
+    [[ ${path##*/} =~ ^\.candidate\.[0-9a-f]{24}\.tar$ \
+      && -f $path \
+      && ! -L $path ]] || continue
+    _deploy_validate_quiescence "$path" __no_build_cgroup__.service || return 1
+    _deploy_remove_candidate_archive "$path" || return 1
+  done
+  for path in "$DEPLOY_APP_ROOT/releases"/.*.tmp; do
+    [[ ${path##*/} =~ ^\.[0-9a-f]{40}\.[0-9a-f]{24}\.tmp$ \
+      && -d $path \
+      && ! -L $path ]] || continue
+    _deploy_validate_quiescence "$path" __no_build_cgroup__.service || return 1
+    _deploy_remove_temporary_release "$path" || return 1
+  done
+  shopt -u nullglob
 }
 
 _deploy_write_atomic_file() {
@@ -679,6 +773,8 @@ _deploy_cleanup() {
   if [[ -n ${DEPLOY_DIAGNOSTIC_ID:-} ]]; then
     rm -f "$DEPLOY_STATE_ROOT/.journal.$DEPLOY_DIAGNOSTIC_ID" 2>/dev/null || true
   fi
+  _deploy_remove_build_workspace >/dev/null 2>&1 || true
+  _deploy_remove_controlled_temporary_paths >/dev/null 2>&1 || true
   _deploy_release_sync_lock
   _deploy_release_flock
 }
@@ -743,7 +839,7 @@ _deploy_restart_after_candidate_failure() {
   else
     DEPLOY_RECOVERY_HANDLED=1
     _deploy_emit_result deployment_recovery_failed "$requested_sha" "$DEPLOY_PREVIOUS_SHA" \
-      "$DEPLOY_PREVIOUS_SHA" "$DEPLOY_DIAGNOSTIC_ID"
+      "" "$DEPLOY_DIAGNOSTIC_ID"
   fi
   return 1
 }
@@ -764,7 +860,7 @@ _deploy_rollback_activation() {
   else
     DEPLOY_RECOVERY_HANDLED=1
     _deploy_emit_result deployment_recovery_failed "$requested_sha" "$DEPLOY_PREVIOUS_SHA" \
-      "$DEPLOY_PREVIOUS_SHA" "$DEPLOY_DIAGNOSTIC_ID"
+      "" "$DEPLOY_DIAGNOSTIC_ID"
   fi
   return 1
 }
@@ -776,9 +872,9 @@ _deploy_reconcile_pending() {
   pending_values=$(_deploy_read_pending) || return 1
   recovery_sha=${pending_values%%$'\n'*}
   candidate_sha=${pending_values#*$'\n'}
-  [[ $recovery_sha == "$DEPLOY_PREVIOUS_SHA" ]] || return 1
   _deploy_validate_existing_release "$recovery_sha" || return 1
-  _deploy_validate_existing_release "$candidate_sha" || return 1
+  validate_sha "$candidate_sha" || return 1
+  DEPLOY_PREVIOUS_SHA=$recovery_sha
   DEPLOY_ACTIVATION_PENDING=1
   if _deploy_stop_for_recovery \
     && _deploy_replace_link current "$recovery_sha" \
@@ -805,14 +901,14 @@ deploy_main() {
 
   DEPLOY_DIAGNOSTIC_ID=$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n') || return 1
   [[ $DEPLOY_DIAGNOSTIC_ID =~ ^[0-9a-f]{24}$ ]] || return 1
+  _deploy_cleanup_abandoned_paths || return 1
 
-  if [[ -e $DEPLOY_STATE_ROOT/deployed-sha || -L $DEPLOY_STATE_ROOT/deployed-sha ]]; then
+  if [[ -e $DEPLOY_STATE_ROOT/activation-state || -L $DEPLOY_STATE_ROOT/activation-state ]]; then
+    _deploy_reconcile_pending || return 1
+  elif [[ -e $DEPLOY_STATE_ROOT/deployed-sha || -L $DEPLOY_STATE_ROOT/deployed-sha ]]; then
     DEPLOY_PREVIOUS_SHA=$(_deploy_read_sha_file "$DEPLOY_STATE_ROOT/deployed-sha") || return 1
   elif [[ -e $DEPLOY_APP_ROOT/current || -L $DEPLOY_APP_ROOT/current ]]; then
     return 1
-  fi
-  if [[ -e $DEPLOY_STATE_ROOT/activation-state || -L $DEPLOY_STATE_ROOT/activation-state ]]; then
-    _deploy_reconcile_pending || return 1
   fi
   if [[ -n $DEPLOY_PREVIOUS_SHA ]]; then
     [[ $(_deploy_current_sha) == "$DEPLOY_PREVIOUS_SHA" ]] || return 1

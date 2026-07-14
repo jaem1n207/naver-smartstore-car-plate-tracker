@@ -184,7 +184,7 @@ describe("deployment preflight and coordination", () => {
 
   it("uses a fixed activation path while a normal dependency start is blocked by recovery", async () => {
     const fixture = await DeploymentFixture.create();
-    const lockHolder = fixture.holdDeployLock(500);
+    const lockHolder = fixture.holdDeployLock(1_500);
     await fixture.waitForControlFile("deploy-lock-held");
 
     const normalStart = await fixture.startWithNormalDependencies();
@@ -205,7 +205,7 @@ describe("deployment preflight and coordination", () => {
 
   it("rejects a concurrent deployment through the root deployment flock", async () => {
     const fixture = await DeploymentFixture.create();
-    const lockHolder = fixture.holdDeployLock(500);
+    const lockHolder = fixture.holdDeployLock(1_500);
     await fixture.waitForControlFile("deploy-lock-held");
 
     const result = await fixture.deploy(fixture.revisions.b);
@@ -290,6 +290,125 @@ describe("candidate build, sealing, and activation", () => {
     expect(await fixture.currentRevision()).toBe(fixture.revisions.b);
   }, 30_000);
 
+  it("uses the pending journal as recovery truth before classifying the next request", async () => {
+    const fixture = await DeploymentFixture.create();
+    await fixture.setMain(fixture.revisions.a);
+    expect((await fixture.deploy(fixture.revisions.a)).code).toBe(0);
+    await fixture.setMain(fixture.revisions.b);
+    await fixture.writeConfig({ crashAfter: "marker-write" });
+
+    expect((await fixture.deploy(fixture.revisions.b)).code).toBe(97);
+    await chmod(join(fixture.releasePath(fixture.revisions.b), "release.env"), 0o640);
+    await writeFile(
+      join(fixture.releasePath(fixture.revisions.b), "release.env"),
+      "APP_REVISION=damaged\n",
+    );
+    await fixture.writeConfig();
+
+    const result = await fixture.deploy(fixture.revisions.a);
+
+    expect(result.code, `${result.stderr}\n${result.stdout}`).toBe(0);
+    expect(parseResult(result.stdout)).toMatchObject({
+      activatedSha: fixture.revisions.a,
+      outcome: "unchanged",
+      previousSha: fixture.revisions.a,
+      requestedSha: fixture.revisions.a,
+    });
+    expect(await fixture.currentRevision()).toBe(fixture.revisions.a);
+    await expect(readFile(join(fixture.stateRoot, "deployed-sha"), "ascii")).resolves.toBe(
+      `${fixture.revisions.a}\n`,
+    );
+    await expect(readFile(join(fixture.stateRoot, "activation-state"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(await fixture.releaseRevisions()).toEqual([fixture.revisions.a]);
+  }, 30_000);
+
+  it("removes allowlisted abandoned build artifacts while retaining current and previous", async () => {
+    const fixture = await DeploymentFixture.create();
+    await fixture.setMain(fixture.revisions.a);
+    expect((await fixture.deploy(fixture.revisions.a)).code).toBe(0);
+    await fixture.setMain(fixture.revisions.b);
+    expect((await fixture.deploy(fixture.revisions.b)).code).toBe(0);
+
+    const diagnosticId = "0123456789abcdef01234567";
+    const abandonedCandidate = join(fixture.appRoot, "candidates", fixture.revisions.c);
+    const abandonedPackageStore = join(fixture.appRoot, "package-store", fixture.revisions.c);
+    const abandonedArchive = join(fixture.stateRoot, `.candidate.${diagnosticId}.tar`);
+    const abandonedRelease = join(
+      fixture.appRoot,
+      "releases",
+      `.${fixture.revisions.c}.${diagnosticId}.tmp`,
+    );
+    const unrelatedStateFile = join(fixture.stateRoot, ".candidate.keep");
+    const unrelatedRelease = join(fixture.appRoot, "releases", ".keep.tmp");
+    const symlinkDiagnosticId = "fedcba9876543210fedcba98";
+    const candidateSymlink = join(fixture.appRoot, "candidates", fixture.revisions.divergent);
+    const packageStoreSymlink = join(fixture.appRoot, "package-store", fixture.revisions.divergent);
+    const archiveSymlink = join(fixture.stateRoot, `.candidate.${symlinkDiagnosticId}.tar`);
+    const releaseSymlink = join(
+      fixture.appRoot,
+      "releases",
+      `.${fixture.revisions.divergent}.${symlinkDiagnosticId}.tmp`,
+    );
+    await mkdir(abandonedCandidate);
+    await mkdir(abandonedPackageStore);
+    await writeFile(abandonedArchive, "partial archive\n");
+    await mkdir(abandonedRelease);
+    await writeFile(unrelatedStateFile, "keep\n");
+    await mkdir(unrelatedRelease);
+    await symlink(fixture.releasePath(fixture.revisions.a), candidateSymlink);
+    await symlink(fixture.releasePath(fixture.revisions.a), packageStoreSymlink);
+    await symlink(unrelatedStateFile, archiveSymlink);
+    await symlink(fixture.releasePath(fixture.revisions.a), releaseSymlink);
+
+    const result = await fixture.deploy(fixture.revisions.b);
+
+    expect(result.code, `${result.stderr}\n${result.stdout}`).toBe(0);
+    for (const abandonedPath of [
+      abandonedCandidate,
+      abandonedPackageStore,
+      abandonedArchive,
+      abandonedRelease,
+    ]) {
+      expect(await pathExists(abandonedPath)).toBe(false);
+    }
+    expect(await pathExists(unrelatedStateFile)).toBe(true);
+    expect(await pathExists(unrelatedRelease)).toBe(true);
+    expect(await readlink(candidateSymlink)).toBe(fixture.releasePath(fixture.revisions.a));
+    expect(await readlink(packageStoreSymlink)).toBe(fixture.releasePath(fixture.revisions.a));
+    expect(await readlink(archiveSymlink)).toBe(unrelatedStateFile);
+    expect(await readlink(releaseSymlink)).toBe(fixture.releasePath(fixture.revisions.a));
+    expect(await fixture.releaseRevisions()).toEqual(
+      [fixture.revisions.a, fixture.revisions.b].sort(),
+    );
+    expect(await fixture.currentRevision()).toBe(fixture.revisions.b);
+    expect(await fixture.previousRevision()).toBe(fixture.revisions.a);
+  }, 30_000);
+
+  it("does not clean an abandoned workspace while a process still references it", async () => {
+    const fixture = await DeploymentFixture.create();
+    await fixture.setMain(fixture.revisions.b);
+    expect((await fixture.deploy(fixture.revisions.b)).code).toBe(0);
+
+    const candidate = join(fixture.appRoot, "candidates", fixture.revisions.c);
+    const packageStore = join(fixture.appRoot, "package-store", fixture.revisions.c);
+    const processFileDescriptors = join(fixture.procRoot, "777", "fd");
+    await mkdir(candidate);
+    await mkdir(packageStore);
+    await mkdir(processFileDescriptors, { recursive: true });
+    await writeFile(join(candidate, "active-build"), "still running\n");
+    await symlink(join(candidate, "active-build"), join(processFileDescriptors, "3"));
+
+    const result = await fixture.deploy(fixture.revisions.b);
+
+    expect(result.code).toBe(1);
+    expect(await pathExists(candidate)).toBe(true);
+    expect(await pathExists(packageStore)).toBe(true);
+    expect(await fixture.currentRevision()).toBe(fixture.revisions.b);
+    expect(await fixture.serviceIsActive()).toBe(true);
+  }, 15_000);
+
   it.each(["escape", "fifo", "cgroup", "fd", "daemon"] as const)(
     "rejects an isolated build with a surviving or unsafe %s artifact",
     async (isolationFailure) => {
@@ -370,7 +489,27 @@ describe("candidate build, sealing, and activation", () => {
     const result = await fixture.deploy(fixture.revisions.b);
 
     expect(result.code).toBe(1);
-    expect(parseResult(result.stdout).outcome).toBe("deployment_recovery_failed");
+    expect(parseResult(result.stdout)).toMatchObject({
+      activatedSha: "",
+      outcome: "deployment_recovery_failed",
+    });
+  }, 15_000);
+
+  it("reports no activated release when the known-good restart cannot be verified", async () => {
+    const fixture = await DeploymentFixture.create();
+    await fixture.setMain(fixture.revisions.a);
+    expect((await fixture.deploy(fixture.revisions.a)).code).toBe(0);
+    await fixture.setMain(fixture.revisions.b);
+    await fixture.setBuildMode("fail");
+    await fixture.failNextStarts(1);
+
+    const result = await fixture.deploy(fixture.revisions.b);
+
+    expect(result.code).toBe(1);
+    expect(parseResult(result.stdout)).toMatchObject({
+      activatedSha: "",
+      outcome: "deployment_recovery_failed",
+    });
   }, 15_000);
 
   it("rejects an immediate restart-count change and rolls back the candidate", async () => {
