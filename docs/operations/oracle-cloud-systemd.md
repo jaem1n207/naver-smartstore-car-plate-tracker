@@ -32,7 +32,7 @@ sudo chown carplate:carplate /etc/naver-smartstore-car-plate-tracker/google-serv
 
 Do not set `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` when the file-path variable is configured.
 
-## Service
+## Service definition
 
 Resolve the exact `pnpm` path available to the service account:
 
@@ -64,7 +64,9 @@ Group=carplate
 WantedBy=multi-user.target
 ```
 
-Enable and start:
+Deploying the application files and activating the scheduler are separate server steps. First complete the code deployment and production build above, then create or update the unit definition. Updating the repository or `.env` does not automatically reload systemd, and reloading systemd does not deploy application code.
+
+After the unit file is created or changed, activate the scheduler explicitly:
 
 ```bash
 sudo systemctl daemon-reload
@@ -74,6 +76,15 @@ sudo journalctl -u car-plate-tracker -f
 ```
 
 The expected startup log contains `scheduler started`, the configured cron expression, and `mode: live`. `systemctl enable` starts the scheduler automatically after a server reboot.
+
+For a later code-only deployment, stop the existing scheduler before replacing the application, install dependencies, and build. Then start the already-defined service again. For a unit or environment change, run `daemon-reload` and explicitly restart or enable the service as appropriate; do not treat a successful build as scheduler activation.
+
+```bash
+sudo systemctl stop car-plate-tracker
+# Deploy the new repository contents, then run pnpm install --frozen-lockfile and pnpm build.
+sudo systemctl start car-plate-tracker
+sudo systemctl status car-plate-tracker --no-pager
+```
 
 ## Manual Maintenance
 
@@ -85,4 +96,4 @@ sudo -u carplate -H pnpm sync:once
 sudo systemctl start car-plate-tracker
 ```
 
-Use `sudo journalctl -u car-plate-tracker -n 100 --no-pager` to review recent automatic runs. A successful scheduled run ends with `scheduled sync completed` and `failureCount: 0`.
+Use `sudo journalctl -u car-plate-tracker -n 100 --no-pager` to review recent automatic runs. A completed scheduled job logs `scheduled sync completed` with `sheetExtractionFailure`, the number of rows across the whole managed sheet without successful plate extraction. A nonzero `sheetExtractionFailure` is a row-level extraction result, not a scheduler failure; the completion message means the job itself succeeded. An actual job failure logs `scheduled sync failed` instead.
