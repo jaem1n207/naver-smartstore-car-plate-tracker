@@ -68,6 +68,22 @@ require_regular_source() {
   [[ -f $1 && ! -L $1 && -r $1 ]] || return 1
 }
 
+validate_bootstrap_source_boundaries() {
+  local source
+
+  for source in \
+    "$ENVIRONMENT_SOURCE" \
+    "$GOOGLE_JSON_SOURCE" \
+    "$AUTHORIZED_KEY_SOURCE" \
+    "$REVIEWED_SCRIPT_DIRECTORY" \
+    "$INITIAL_RELEASE_SOURCE"; do
+    [[ -n $source ]] || continue
+    require_absolute_path "$source" || die 'bootstrap source paths must be absolute and normalized'
+    [[ $source != "$APP_ROOT" && $source != "$APP_ROOT/"* ]] ||
+      die 'bootstrap sources must remain outside the managed application root'
+  done
+}
+
 ensure_group() {
   [[ $# -eq 1 ]] || return 1
   getent group "$1" >/dev/null 2>&1 || groupadd --system "$1"
@@ -526,6 +542,7 @@ main() {
   require_absolute_path "$SSHD_CONFIG" || die 'CARPLATE_SSHD_CONFIG must be an absolute normalized path'
   require_absolute_path "$AUTHORIZED_KEYS" || die 'CARPLATE_AUTHORIZED_KEYS must be an absolute normalized path'
   require_absolute_path "$SUDOERS_FILE" || die 'CARPLATE_SUDOERS_FILE must be an absolute normalized path'
+  validate_bootstrap_source_boundaries
 
   ensure_group "$CARPLATE_RUNTIME_USER"
   ensure_group "$CARPLATE_BUILD_USER"

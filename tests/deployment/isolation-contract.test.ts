@@ -187,8 +187,19 @@ describe("deployment isolation contract", () => {
     expect(second.stderr).toContain("deployment account UIDs must be distinct nonzero values");
   }, 15_000);
 
-  it("seals a secretless initial release before enabling the scheduler and preserves it on repeat", async () => {
+  it("rejects an initial release source inside the managed application root", async () => {
     const fixture = await createBootstrapFixture({ initialSourceInAppRoot: true });
+
+    const result = await runBootstrap(fixture);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(
+      "bootstrap sources must remain outside the managed application root",
+    );
+  });
+
+  it("seals a secretless initial release before enabling the scheduler and preserves it on repeat", async () => {
+    const fixture = await createBootstrapFixture();
     const temporaryRelease = join(
       fixture.appRoot,
       "releases",
