@@ -82,6 +82,7 @@ _deploy_reset_runtime_state() {
   DEPLOY_DIAGNOSTIC_ID=
   DEPLOY_REQUESTED_SHA=
   DEPLOY_PREVIOUS_SHA=
+  DEPLOY_PRIOR_PREVIOUS_SHA=
   DEPLOY_SYNC_TOKEN=
   DEPLOY_SYNC_TOKEN_FILE=
   DEPLOY_SERVICE_STOPPED=0
@@ -188,18 +189,32 @@ _deploy_fetch_and_classify() {
   git --git-dir="$DEPLOY_REPOSITORY" fetch --force --no-tags "$DEPLOY_ORIGIN" \
     '+refs/heads/main:refs/remotes/origin/main' >/dev/null 2>&1 || return 1
   git --git-dir="$DEPLOY_REPOSITORY" cat-file -e "${requested_sha}^{commit}" 2>/dev/null || return 1
+  origin_head=$(git --git-dir="$DEPLOY_REPOSITORY" rev-parse refs/remotes/origin/main 2>/dev/null) || return 1
   git --git-dir="$DEPLOY_REPOSITORY" merge-base --is-ancestor \
-    "$requested_sha" refs/remotes/origin/main 2>/dev/null || return 1
+    "$requested_sha" "$origin_head" 2>/dev/null || return 1
+  if [[ $origin_head != "$requested_sha" ]]; then
+    [[ -n $deployed_sha ]] || return 1
+    printf 'stale\n'
+    return 0
+  fi
 
   if [[ -z $deployed_sha ]]; then
-    origin_head=$(git --git-dir="$DEPLOY_REPOSITORY" rev-parse refs/remotes/origin/main 2>/dev/null) || return 1
-    [[ $origin_head == "$requested_sha" ]] || return 1
     printf 'initial\n'
     return 0
   fi
 
   classification=$(classify_revision "$DEPLOY_REPOSITORY" "$deployed_sha" "$requested_sha") || return 1
   printf '%s\n' "$classification"
+}
+
+_deploy_request_is_current_main() {
+  local requested_sha=$1
+  local origin_head
+
+  git --git-dir="$DEPLOY_REPOSITORY" fetch --force --no-tags "$DEPLOY_ORIGIN" \
+    '+refs/heads/main:refs/remotes/origin/main' >/dev/null 2>&1 || return 1
+  origin_head=$(git --git-dir="$DEPLOY_REPOSITORY" rev-parse refs/remotes/origin/main 2>/dev/null) || return 1
+  [[ $origin_head == "$requested_sha" ]]
 }
 
 _deploy_preflight() {
@@ -298,15 +313,60 @@ _deploy_run_isolated_build() {
     --property=MemoryMax=900M \
     --property=MemorySwapMax=2G \
     --property=TasksMax=128 \
+    --property=LimitFSIZE=536870912 \
     --property=ProtectSystem=strict \
     --property=ProtectHome=true \
     --property=PrivateTmp=true \
+    --property=PrivateNetwork=true \
+    --property=TemporaryFileSystem=/tmp:size=256M,nr_inodes=65536,mode=1777 \
+    --property=NoNewPrivileges=true \
+    --property=IPAddressDeny=127.0.0.0/8 \
+    --property=IPAddressDeny=10.0.0.0/8 \
+    --property=IPAddressDeny=172.16.0.0/12 \
+    --property=IPAddressDeny=192.168.0.0/16 \
+    --property=IPAddressDeny=169.254.0.0/16 \
+    --property=IPAddressDeny=::1/128 \
+    --property=IPAddressDeny=fc00::/7 \
+    --property=IPAddressDeny=fe80::/10 \
+    --property="ReadWritePaths=$candidate" \
+    --property="ReadWritePaths=$package_store" \
+    --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    --setenv=CI=1 \
+    --setenv=npm_config_registry=https://registry.npmjs.org/ \
+    --setenv=npm_config_strict_ssl=true \
+    -- "$DEPLOY_BUILD_SCRIPT" build "$candidate" "$package_store" >/dev/null 2>&1
+}
+
+_deploy_fetch_dependencies() {
+  local sha=$1
+  local candidate=$2
+  local package_store=$3
+
+  "$DEPLOY_SYSTEMD_RUN_COMMAND" \
+    --quiet \
+    --wait \
+    --collect \
+    --unit="carplate-fetch-${sha}" \
+    --uid="$DEPLOY_BUILD_USER" \
+    --gid="$DEPLOY_BUILD_USER" \
+    --working-directory="$candidate" \
+    --property=Type=exec \
+    --property=KillMode=control-group \
+    --property=RuntimeMaxSec=15min \
+    --property=MemoryMax=600M \
+    --property=MemorySwapMax=1G \
+    --property=TasksMax=64 \
+    --property=LimitFSIZE=536870912 \
+    --property=ProtectSystem=strict \
+    --property=ProtectHome=true \
+    --property=PrivateTmp=true \
+    --property=TemporaryFileSystem=/tmp:size=256M,nr_inodes=65536,mode=1777 \
     --property=NoNewPrivileges=true \
     --property="ReadWritePaths=$candidate" \
     --property="ReadWritePaths=$package_store" \
     --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     --setenv=CI=1 \
-    -- "$DEPLOY_BUILD_SCRIPT" "$candidate" "$package_store" >/dev/null 2>&1
+    -- "$DEPLOY_BUILD_SCRIPT" fetch "$candidate" "$package_store" >/dev/null 2>&1
 }
 
 _deploy_validate_quiescence() {
@@ -348,6 +408,10 @@ _deploy_validate_existing_release() {
   local release=$DEPLOY_APP_ROOT/releases/$sha
   local revision
   [[ -d $release && ! -L $release ]] || return 1
+  validate_candidate_tree "$release" || return 1
+  [[ -f $release/package.json && ! -L $release/package.json ]] || return 1
+  [[ -f $release/dist/src/scheduler/main.js && ! -L $release/dist/src/scheduler/main.js ]] || return 1
+  [[ -d $release/node_modules && ! -L $release/node_modules ]] || return 1
   [[ -f $release/release.env && ! -L $release/release.env ]] || return 1
   IFS= read -r revision <"$release/release.env" || return 1
   [[ $revision == "APP_REVISION=$sha" ]] || return 1
@@ -407,7 +471,10 @@ _deploy_prepare_release() {
   fi
 
   local build_status=0
-  _deploy_run_isolated_build "$sha" "$candidate" "$package_store" || build_status=$?
+  _deploy_fetch_dependencies "$sha" "$candidate" "$package_store" || build_status=$?
+  if (( build_status == 0 )); then
+    _deploy_run_isolated_build "$sha" "$candidate" "$package_store" || build_status=$?
+  fi
   _deploy_validate_quiescence "$candidate" "$cgroup_name" || return 1
   if [[ $build_status -ne 0 ]] \
     || ! validate_candidate_tree "$candidate" \
@@ -538,12 +605,13 @@ _deploy_replace_link() {
 
 _deploy_write_journal() {
   local previous_sha=$1
-  local candidate_sha=$2
+  local prior_previous_sha=$2
+  local candidate_sha=$3
   python3 -c '
 import json
 import sys
-print(json.dumps({"state":"pending","previousSha":sys.argv[1],"candidateSha":sys.argv[2]}, separators=(",",":")))
-' "$previous_sha" "$candidate_sha" | _deploy_write_atomic_file "$DEPLOY_STATE_ROOT/activation-state" 0600
+print(json.dumps({"state":"pending","previousSha":sys.argv[1],"priorPreviousSha":sys.argv[2],"candidateSha":sys.argv[3]}, separators=(",",":")))
+' "$previous_sha" "$prior_previous_sha" "$candidate_sha" | _deploy_write_atomic_file "$DEPLOY_STATE_ROOT/activation-state" 0600
 }
 
 _deploy_write_marker() {
@@ -572,7 +640,7 @@ def unique_object(pairs):
 
 with open(sys.argv[1], "r", encoding="utf-8") as source:
     value = json.load(source, object_pairs_hook=unique_object, parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()))
-if not isinstance(value, dict) or set(value) != {"state", "previousSha", "candidateSha"}:
+if not isinstance(value, dict) or set(value) != {"state", "previousSha", "priorPreviousSha", "candidateSha"}:
     raise SystemExit(1)
 if value["state"] != "pending":
     raise SystemExit(1)
@@ -580,8 +648,10 @@ for key in ("previousSha", "candidateSha"):
     candidate = value[key]
     if not isinstance(candidate, str) or len(candidate) != 40 or any(character not in "0123456789abcdef" for character in candidate):
         raise SystemExit(1)
-print(value["previousSha"])
-print(value["candidateSha"])
+prior_previous = value["priorPreviousSha"]
+if not isinstance(prior_previous, str) or (prior_previous and (len(prior_previous) != 40 or any(character not in "0123456789abcdef" for character in prior_previous))):
+    raise SystemExit(1)
+print("|".join((value["previousSha"], prior_previous, value["candidateSha"])))
 ' "$pending"
 }
 
@@ -792,6 +862,8 @@ _deploy_emergency_recovery() {
     return 0
   fi
   if _deploy_replace_link current "$DEPLOY_PREVIOUS_SHA" >/dev/null 2>&1 \
+    && { [[ -z $DEPLOY_PRIOR_PREVIOUS_SHA ]] \
+      || _deploy_replace_link previous "$DEPLOY_PRIOR_PREVIOUS_SHA" >/dev/null 2>&1; } \
     && _deploy_start_and_verify "$DEPLOY_PREVIOUS_SHA" \
     && _deploy_write_marker "$DEPLOY_PREVIOUS_SHA" \
     && _deploy_clear_journal \
@@ -845,11 +917,29 @@ _deploy_restart_after_candidate_failure() {
   return 1
 }
 
+_deploy_restart_after_superseded_build() {
+  local requested_sha=$1
+  if [[ -n $DEPLOY_PREVIOUS_SHA ]] \
+    && _deploy_start_and_verify "$DEPLOY_PREVIOUS_SHA" \
+    && _deploy_prune_releases; then
+    DEPLOY_RECOVERY_HANDLED=1
+    DEPLOY_SERVICE_STOPPED=0
+    _deploy_emit_result superseded "$requested_sha" "$DEPLOY_PREVIOUS_SHA" \
+      "$DEPLOY_PREVIOUS_SHA" "$DEPLOY_DIAGNOSTIC_ID"
+    return 0
+  fi
+  DEPLOY_RECOVERY_HANDLED=1
+  _deploy_emit_result deployment_recovery_failed "$requested_sha" "$DEPLOY_PREVIOUS_SHA" \
+    "" "$DEPLOY_DIAGNOSTIC_ID"
+  return 1
+}
+
 _deploy_rollback_activation() {
   local requested_sha=$1
   if _deploy_stop_for_recovery \
     && [[ -n $DEPLOY_PREVIOUS_SHA ]] \
     && _deploy_replace_link current "$DEPLOY_PREVIOUS_SHA" \
+    && { [[ -z $DEPLOY_PRIOR_PREVIOUS_SHA ]] || _deploy_replace_link previous "$DEPLOY_PRIOR_PREVIOUS_SHA"; } \
     && _deploy_start_and_verify "$DEPLOY_PREVIOUS_SHA" \
     && _deploy_write_marker "$DEPLOY_PREVIOUS_SHA" \
     && _deploy_clear_journal \
@@ -869,16 +959,19 @@ _deploy_rollback_activation() {
 _deploy_reconcile_pending() {
   local pending_values
   local recovery_sha
+  local prior_previous_sha
   local candidate_sha
   pending_values=$(_deploy_read_pending) || return 1
-  recovery_sha=${pending_values%%$'\n'*}
-  candidate_sha=${pending_values#*$'\n'}
+  IFS='|' read -r recovery_sha prior_previous_sha candidate_sha <<<"$pending_values"
   _deploy_validate_existing_release "$recovery_sha" || return 1
+  [[ -z $prior_previous_sha ]] || _deploy_validate_existing_release "$prior_previous_sha" || return 1
   validate_sha "$candidate_sha" || return 1
   DEPLOY_PREVIOUS_SHA=$recovery_sha
+  DEPLOY_PRIOR_PREVIOUS_SHA=$prior_previous_sha
   DEPLOY_ACTIVATION_PENDING=1
   if _deploy_stop_for_recovery \
     && _deploy_replace_link current "$recovery_sha" \
+    && { [[ -z $prior_previous_sha ]] || _deploy_replace_link previous "$prior_previous_sha"; } \
     && _deploy_start_and_verify "$recovery_sha" \
     && _deploy_write_marker "$recovery_sha" \
     && _deploy_clear_journal \
@@ -945,7 +1038,15 @@ deploy_main() {
     return 1
   fi
 
-  _deploy_write_journal "$DEPLOY_PREVIOUS_SHA" "$DEPLOY_REQUESTED_SHA" || return 1
+  if [[ -e $DEPLOY_APP_ROOT/previous || -L $DEPLOY_APP_ROOT/previous ]]; then
+    DEPLOY_PRIOR_PREVIOUS_SHA=$(_deploy_link_sha previous) || return 1
+  fi
+  if ! _deploy_request_is_current_main "$DEPLOY_REQUESTED_SHA"; then
+    _deploy_restart_after_superseded_build "$DEPLOY_REQUESTED_SHA"
+    return $?
+  fi
+  _deploy_write_journal "$DEPLOY_PREVIOUS_SHA" "$DEPLOY_PRIOR_PREVIOUS_SHA" \
+    "$DEPLOY_REQUESTED_SHA" || return 1
   DEPLOY_ACTIVATION_PENDING=1
   _deploy_crash_point pending-journal
   if [[ -n $DEPLOY_PREVIOUS_SHA ]]; then
@@ -973,10 +1074,10 @@ deploy_main() {
 
   _deploy_write_marker "$DEPLOY_REQUESTED_SHA" || return 1
   _deploy_crash_point marker-write
-  _deploy_prune_releases || return 1
   _deploy_clear_journal || return 1
   DEPLOY_ACTIVATION_PENDING=0
   _deploy_crash_point pending-clear
+  _deploy_prune_releases || return 1
   DEPLOY_RECOVERY_HANDLED=1
   DEPLOY_SERVICE_STOPPED=0
   _deploy_emit_result deployed "$DEPLOY_REQUESTED_SHA" "$DEPLOY_PREVIOUS_SHA" \

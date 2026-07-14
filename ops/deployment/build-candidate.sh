@@ -52,6 +52,13 @@ _validate_build_paths() {
   fi
 }
 
+_validate_lockfile_sources() {
+  [[ -f pnpm-lock.yaml && ! -L pnpm-lock.yaml ]] || return 1
+  if grep -Eiq '(https?://|git\+|tarball:)' pnpm-lock.yaml; then
+    return 1
+  fi
+}
+
 _close_inherited_descriptors() {
   local descriptor_path
   local descriptor
@@ -69,10 +76,11 @@ _close_inherited_descriptors() {
 }
 
 build_candidate_main() {
-  [[ $# -eq 2 ]] || return 1
+  [[ $# -eq 3 ]] || return 1
   _build_candidate_load_configuration
-  local candidate=$1
-  local package_store=$2
+  local phase=$1
+  local candidate=$2
+  local package_store=$3
 
   _validate_build_paths "$candidate" "$package_store" || return 1
   _close_inherited_descriptors
@@ -86,11 +94,22 @@ build_candidate_main() {
   umask 022
   mkdir -p "$HOME" "$PNPM_HOME" "$PNPM_STORE_DIR"
   cd "$candidate"
+  _validate_lockfile_sources
 
-  "$BUILD_PNPM_COMMAND" install --frozen-lockfile
-  "$BUILD_PNPM_COMMAND" build
-  "$BUILD_NODE_COMMAND" --check dist/src/scheduler/main.js
-  "$BUILD_PNPM_COMMAND" prune --prod
+  case "$phase" in
+    fetch)
+      "$BUILD_PNPM_COMMAND" fetch --frozen-lockfile --ignore-scripts
+      ;;
+    build)
+      "$BUILD_PNPM_COMMAND" install --offline --frozen-lockfile --ignore-scripts
+      "$BUILD_PNPM_COMMAND" build
+      "$BUILD_NODE_COMMAND" --check dist/src/scheduler/main.js
+      "$BUILD_PNPM_COMMAND" prune --prod
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 if ! _build_candidate_is_sourced; then

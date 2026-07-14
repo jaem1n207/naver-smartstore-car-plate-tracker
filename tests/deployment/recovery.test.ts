@@ -103,9 +103,10 @@ describe("recovery validation", () => {
 
   it.each([
     "not-json\n",
-    `{"state":"pending","previousSha":"${firstSha}","previousSha":"${secondSha}","candidateSha":"${secondSha}"}\n`,
-    `{"state":"complete","previousSha":"${firstSha}","candidateSha":"${secondSha}"}\n`,
-    `{"state":"pending","previousSha":"short","candidateSha":"${secondSha}"}\n`,
+    `{"state":"pending","previousSha":"${firstSha}","previousSha":"${secondSha}","priorPreviousSha":"","candidateSha":"${secondSha}"}\n`,
+    `{"state":"complete","previousSha":"${firstSha}","priorPreviousSha":"","candidateSha":"${secondSha}"}\n`,
+    `{"state":"pending","previousSha":"short","priorPreviousSha":"","candidateSha":"${secondSha}"}\n`,
+    `{"state":"pending","previousSha":"${firstSha}","priorPreviousSha":"short","candidateSha":"${secondSha}"}\n`,
   ])("fails closed for malformed pending state: %s", async (journal) => {
     const fixture = await RecoveryFixture.create();
     await fixture.linkCurrent(secondSha);
@@ -132,6 +133,16 @@ describe("recovery validation", () => {
   it("refuses to start without a durable marker", async () => {
     const fixture = await RecoveryFixture.create();
     await fixture.linkCurrent(firstSha);
+
+    expect((await fixture.recover()).code).toBe(1);
+    expect(await fixture.currentSha()).toBe(firstSha);
+  });
+
+  it("rejects a release whose sealed tree permissions were weakened", async () => {
+    const fixture = await RecoveryFixture.create();
+    await fixture.linkCurrent(firstSha);
+    await fixture.writeMarker(firstSha);
+    await chmod(join(fixture.appRoot, "releases", firstSha, "package.json"), 0o660);
 
     expect((await fixture.recover()).code).toBe(1);
     expect(await fixture.currentSha()).toBe(firstSha);
@@ -165,8 +176,14 @@ class RecoveryFixture {
     for (const sha of [firstSha, secondSha]) {
       const release = join(fixture.appRoot, "releases", sha);
       await mkdir(release, { mode: 0o700 });
+      await mkdir(join(release, "dist", "src", "scheduler"), { recursive: true, mode: 0o700 });
+      await mkdir(join(release, "node_modules"), { mode: 0o700 });
+      await writeFile(join(release, "package.json"), "{}\n", { mode: 0o440 });
+      await writeFile(join(release, "dist", "src", "scheduler", "main.js"), "export {};\n", {
+        mode: 0o440,
+      });
       await writeFile(join(release, "release.env"), `APP_REVISION=${sha}\n`, { mode: 0o440 });
-      await chmod(release, 0o550);
+      await runProcess("chmod", ["-R", "a-w", release]);
     }
     await fixture.writeConfig();
     return fixture;
@@ -205,10 +222,14 @@ class RecoveryFixture {
     await writeFile(join(this.stateRoot, "deployed-sha"), `${sha}\n`, { mode: 0o600 });
   }
 
-  async writePending(previousSha: string, candidateSha: string): Promise<void> {
+  async writePending(
+    previousSha: string,
+    candidateSha: string,
+    priorPreviousSha = "",
+  ): Promise<void> {
     await writeFile(
       join(this.stateRoot, "activation-state"),
-      `${JSON.stringify({ candidateSha, previousSha, state: "pending" })}\n`,
+      `${JSON.stringify({ candidateSha, previousSha, priorPreviousSha, state: "pending" })}\n`,
       { mode: 0o600 },
     );
   }

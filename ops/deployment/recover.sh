@@ -114,7 +114,7 @@ def unique_object(pairs):
 
 with open(sys.argv[1], "r", encoding="utf-8") as source:
     value = json.load(source, object_pairs_hook=unique_object, parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()))
-if not isinstance(value, dict) or set(value) != {"state", "previousSha", "candidateSha"}:
+if not isinstance(value, dict) or set(value) != {"state", "previousSha", "priorPreviousSha", "candidateSha"}:
     raise SystemExit(1)
 if value["state"] != "pending":
     raise SystemExit(1)
@@ -122,8 +122,10 @@ for key in ("previousSha", "candidateSha"):
     candidate = value[key]
     if not isinstance(candidate, str) or len(candidate) != 40 or any(character not in "0123456789abcdef" for character in candidate):
         raise SystemExit(1)
-print(value["previousSha"])
-print(value["candidateSha"])
+prior_previous = value["priorPreviousSha"]
+if not isinstance(prior_previous, str) or (prior_previous and (len(prior_previous) != 40 or any(character not in "0123456789abcdef" for character in prior_previous))):
+    raise SystemExit(1)
+print("|".join((value["previousSha"], prior_previous, value["candidateSha"])))
 ' "$pending"
 }
 
@@ -133,6 +135,10 @@ _recover_validate_release() {
   local revision
   validate_sha "$sha" || return 1
   [[ -d $release && ! -L $release ]] || return 1
+  validate_candidate_tree "$release" || return 1
+  [[ -f $release/package.json && ! -L $release/package.json ]] || return 1
+  [[ -f $release/dist/src/scheduler/main.js && ! -L $release/dist/src/scheduler/main.js ]] || return 1
+  [[ -d $release/node_modules && ! -L $release/node_modules ]] || return 1
   [[ -f $release/release.env && ! -L $release/release.env ]] || return 1
   IFS= read -r revision <"$release/release.env" || return 1
   [[ $revision == "APP_REVISION=$sha" ]] || return 1
@@ -151,6 +157,12 @@ _recover_replace_current() {
   local sha=$1
   python3 "$RECOVER_ATOMIC_FS" --allowed-root "$RECOVER_APP_ROOT" \
     replace-symlink "$RECOVER_APP_ROOT/current" "releases/$sha"
+}
+
+_recover_replace_previous() {
+  local sha=$1
+  python3 "$RECOVER_ATOMIC_FS" --allowed-root "$RECOVER_APP_ROOT" \
+    replace-symlink "$RECOVER_APP_ROOT/previous" "releases/$sha"
 }
 
 _recover_write_marker() {
@@ -174,13 +186,18 @@ recover_main() {
   local current_sha=
   local pending_values
   local recovery_sha
+  local prior_previous_sha
   marker_sha=$(_recover_read_marker) || return 1
 
   if [[ -e $RECOVER_STATE_ROOT/activation-state || -L $RECOVER_STATE_ROOT/activation-state ]]; then
     pending_values=$(_recover_read_pending) || return 1
-    recovery_sha=${pending_values%%$'\n'*}
+    IFS='|' read -r recovery_sha prior_previous_sha _candidate_sha <<<"$pending_values"
     _recover_validate_release "$recovery_sha" || return 1
+    [[ -z $prior_previous_sha ]] || _recover_validate_release "$prior_previous_sha" || return 1
     _recover_replace_current "$recovery_sha" || return 1
+    if [[ -n $prior_previous_sha ]]; then
+      _recover_replace_previous "$prior_previous_sha" || return 1
+    fi
     _recover_write_marker "$recovery_sha" || return 1
     _recover_clear_pending || return 1
     return 0

@@ -76,6 +76,21 @@ describe("deployment request validation and monotonic revisions", () => {
       requestedSha: fixture.revisions.b,
     });
     expect(await fixture.currentRevision()).toBe(fixture.revisions.b);
+    const systemdRun = await fixture.systemdRunLog();
+    for (const deniedRange of [
+      "127.0.0.0/8",
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+      "169.254.0.0/16",
+      "::1/128",
+      "fc00::/7",
+      "fe80::/10",
+    ]) {
+      expect(systemdRun).toContain(`--property=IPAddressDeny=${deniedRange}`);
+    }
+    expect(systemdRun).toContain("--setenv=npm_config_registry=https://registry.npmjs.org/");
+    expect(systemdRun).toContain("--setenv=npm_config_strict_ssl=true");
   });
 
   it("deploys only forward revisions and treats equal or stale requests as successful no-ops", async () => {
@@ -122,9 +137,7 @@ describe("deployment request validation and monotonic revisions", () => {
       const result = await fixture.deploy(fixture.revisions[request]);
 
       expect(result.code, `${result.stderr}\n${result.stdout}`).toBe(0);
-      expect(parseResult(result.stdout).outcome).toBe(
-        classification === "equal" ? "unchanged" : "superseded",
-      );
+      expect(parseResult(result.stdout).outcome).toBe("superseded");
       expect(await fixture.currentRevision()).toBe(knownGood);
       await expect(readFile(join(fixture.stateRoot, "activation-state"))).rejects.toMatchObject({
         code: "ENOENT",
@@ -144,6 +157,21 @@ describe("deployment request validation and monotonic revisions", () => {
     expect(result.code).toBe(1);
     expect(await fixture.currentRevision()).toBe(fixture.revisions.b);
   });
+
+  it("does not activate a request superseded while its candidate is building", async () => {
+    const fixture = await DeploymentFixture.create();
+    await fixture.setMain(fixture.revisions.a);
+    expect((await fixture.deploy(fixture.revisions.a)).code).toBe(0);
+    await fixture.setMain(fixture.revisions.b);
+    await fixture.setBuildMode("advance-main");
+
+    const result = await fixture.deploy(fixture.revisions.b);
+
+    expect(result.code, `${result.stderr}\n${result.stdout}`).toBe(0);
+    expect(parseResult(result.stdout).outcome).toBe("superseded");
+    expect(await fixture.currentRevision()).toBe(fixture.revisions.a);
+    expect(await fixture.serviceIsActive()).toBe(true);
+  }, 30_000);
 });
 
 describe("deployment preflight and coordination", () => {
@@ -234,9 +262,14 @@ describe("candidate build, sealing, and activation", () => {
       "TasksMax=128",
       "ProtectSystem=strict",
       "NoNewPrivileges=true",
+      "PrivateNetwork=true",
+      "LimitFSIZE=536870912",
+      "TemporaryFileSystem=/tmp:size=256M,nr_inodes=65536,mode=1777",
     ]) {
       expect(systemdRun).toContain(expected);
     }
+    expect(systemdRun).toContain(`--unit=carplate-fetch-${fixture.revisions.b}`);
+    expect(systemdRun).toContain("--unit=carplate-build");
     expect(systemdRun).not.toContain("NAVER_");
     expect(systemdRun).not.toContain("GOOGLE_");
     await expect(
@@ -310,7 +343,7 @@ describe("candidate build, sealing, and activation", () => {
     expect(result.code, `${result.stderr}\n${result.stdout}`).toBe(0);
     expect(parseResult(result.stdout)).toMatchObject({
       activatedSha: fixture.revisions.a,
-      outcome: "unchanged",
+      outcome: "superseded",
       previousSha: fixture.revisions.a,
       requestedSha: fixture.revisions.a,
     });
@@ -475,9 +508,49 @@ describe("candidate build, sealing, and activation", () => {
     expect(parseResult(result.stdout).outcome).toBe("activation_failed_rolled_back");
     expect(await fixture.currentRevision()).toBe(fixture.revisions.a);
     expect((await fixture.systemdRunLog()).split("systemd-run").length).toBe(
-      buildCountBefore.split("systemd-run").length + 1,
+      buildCountBefore.split("systemd-run").length + 2,
     );
   }, 15_000);
+
+  it("preserves both known-good releases when C activation fails after A and B", async () => {
+    const fixture = await DeploymentFixture.create();
+    for (const revision of [fixture.revisions.a, fixture.revisions.b]) {
+      await fixture.setMain(revision);
+      expect((await fixture.deploy(revision)).code).toBe(0);
+    }
+    await fixture.setMain(fixture.revisions.c);
+    await fixture.failNextStarts(1);
+
+    const result = await fixture.deploy(fixture.revisions.c);
+
+    expect(result.code).toBe(1);
+    expect(parseResult(result.stdout).outcome).toBe("activation_failed_rolled_back");
+    expect(await fixture.currentRevision()).toBe(fixture.revisions.b);
+    expect(await fixture.previousRevision()).toBe(fixture.revisions.a);
+    expect(await fixture.releaseRevisions()).toEqual(
+      [fixture.revisions.a, fixture.revisions.b].sort(),
+    );
+  }, 30_000);
+
+  it("restores both known-good links when C activation fails during marker publication", async () => {
+    const fixture = await DeploymentFixture.create();
+    for (const revision of [fixture.revisions.a, fixture.revisions.b]) {
+      await fixture.setMain(revision);
+      expect((await fixture.deploy(revision)).code).toBe(0);
+    }
+    await fixture.setMain(fixture.revisions.c);
+    await fixture.failNextMarkerWrite();
+
+    const result = await fixture.deploy(fixture.revisions.c);
+
+    expect(result.code).toBe(1);
+    expect(parseResult(result.stdout).outcome).toBe("deployment_failed_recovered");
+    expect(await fixture.currentRevision()).toBe(fixture.revisions.b);
+    expect(await fixture.previousRevision()).toBe(fixture.revisions.a);
+    expect(await fixture.releaseRevisions()).toEqual(
+      [fixture.revisions.a, fixture.revisions.b].sort(),
+    );
+  }, 30_000);
 
   it("fails closed when activation and rollback both fail", async () => {
     const fixture = await DeploymentFixture.create();
@@ -590,13 +663,14 @@ describe("candidate build, sealing, and activation", () => {
 });
 
 describe("build-candidate helper", () => {
-  it("runs the frozen install, build, syntax check, and production prune in order", async () => {
+  it("fetches without lifecycle scripts then installs offline, builds, checks, and prunes", async () => {
     const root = await createTemporaryDirectory("carplate-build-helper-");
     const candidate = join(root, "candidate");
     const store = join(root, "store");
     const calls = join(root, "calls");
     await mkdir(candidate);
     await mkdir(store);
+    await writeFile(join(candidate, "pnpm-lock.yaml"), 'lockfileVersion: "9.0"\n');
     await mkdir(join(candidate, "dist", "src", "scheduler"), { recursive: true });
     await writeFile(join(candidate, "dist", "src", "scheduler", "main.js"), "'use strict';\n");
     const command = join(root, "command-shim");
@@ -614,9 +688,18 @@ describe("build-candidate helper", () => {
       ].join("\n"),
     );
 
-    const result = await runProcess("bash", [
+    const fetchResult = await runProcess("bash", [
       "-c",
-      'CARPLATE_SOURCE_TEST_CONFIG=$1; source "$2"; build_candidate_main "$3" "$4"',
+      'CARPLATE_SOURCE_TEST_CONFIG=$1; source "$2"; build_candidate_main fetch "$3" "$4"',
+      "bash",
+      config,
+      buildCandidateScript,
+      candidate,
+      store,
+    ]);
+    const buildResult = await runProcess("bash", [
+      "-c",
+      'CARPLATE_SOURCE_TEST_CONFIG=$1; source "$2"; build_candidate_main build "$3" "$4"',
       "bash",
       config,
       buildCandidateScript,
@@ -624,16 +707,51 @@ describe("build-candidate helper", () => {
       store,
     ]);
 
-    expect(result.code, result.stderr).toBe(0);
+    expect(fetchResult.code, fetchResult.stderr).toBe(0);
+    expect(buildResult.code, buildResult.stderr).toBe(0);
     expect(await readFile(calls, "utf8")).toBe(
       [
-        "install --frozen-lockfile",
+        "fetch --frozen-lockfile --ignore-scripts",
+        "install --offline --frozen-lockfile --ignore-scripts",
         "build",
         "--check dist/src/scheduler/main.js",
         "prune --prod",
         "",
       ].join("\n"),
     );
+  });
+
+  it("rejects explicit remote and git sources in the dependency lockfile", async () => {
+    const root = await createTemporaryDirectory("carplate-build-source-policy-");
+    const candidate = join(root, "candidate");
+    const store = join(root, "store");
+    await mkdir(candidate);
+    await mkdir(store);
+    await writeFile(
+      join(candidate, "pnpm-lock.yaml"),
+      'lockfileVersion: "9.0"\npackages:\n  dependency:\n    resolution:\n      tarball: https://example.test/archive.tgz\n',
+    );
+    const config = join(root, "build-config.sh");
+    await writeFile(
+      config,
+      [
+        `BUILD_TEST_ALLOWED_ROOT=${shellQuote(root)}`,
+        "BUILD_PNPM_COMMAND=/usr/bin/false",
+        "BUILD_NODE_COMMAND=/usr/bin/false",
+      ].join("\n"),
+    );
+
+    const result = await runProcess("bash", [
+      "-c",
+      'CARPLATE_SOURCE_TEST_CONFIG=$1; source "$2"; build_candidate_main fetch "$3" "$4"',
+      "bash",
+      config,
+      buildCandidateScript,
+      candidate,
+      store,
+    ]);
+
+    expect(result.code).toBe(1);
   });
 });
 
@@ -1117,6 +1235,10 @@ candidate=$(printf '%s\\n' "$*" | awk '{print $(NF-1)}')
 mode=$(cat ${q(join(control, "build-mode"))})
 case "$mode" in
   success) exit 0 ;;
+  advance-main)
+    git -C ${q(fixture.origin)} update-ref refs/heads/main ${q(fixture.revisions.c)}
+    exit 0
+    ;;
   fail) exit 1 ;;
   escape) ln -s ../../outside "$candidate/escaping"; exit 0 ;;
   fifo) mkfifo "$candidate/unsafe-fifo"; exit 0 ;;
