@@ -38,6 +38,7 @@ readonly ENVIRONMENT_SOURCE=${CARPLATE_ENV_SOURCE:-"${DEPLOYMENT_DIRECTORY}/../.
 readonly GOOGLE_JSON_SOURCE=${CARPLATE_GOOGLE_JSON_SOURCE:-"${DEPLOYMENT_DIRECTORY}/../../google-service-account.json"}
 readonly AUTHORIZED_KEY_SOURCE=${CARPLATE_AUTHORIZED_KEY_SOURCE:-}
 readonly REVIEWED_SCRIPT_DIRECTORY=${CARPLATE_REVIEWED_SCRIPT_DIR:-"${DEPLOYMENT_DIRECTORY}"}
+readonly REVIEWED_SOURCE_TRUST_ROOT=${CARPLATE_TEST_SOURCE_TRUST_ROOT:-/}
 readonly INITIAL_RELEASE_SOURCE=${CARPLATE_INITIAL_RELEASE_SOURCE:-"${REPOSITORY_ROOT}"}
 readonly RUNTIME_DIRECTORY="${STATE_ROOT}/runtime"
 readonly DEPLOYMENT_STATE_DIRECTORY="${STATE_ROOT}/deployment"
@@ -51,6 +52,13 @@ readonly DEPLOY_ENTRYPOINT="${PRIVILEGED_EXECUTABLE_DIRECTORY}/car-plate-tracker
 readonly DEPLOYER="${PRIVILEGED_EXECUTABLE_DIRECTORY}/deploy-car-plate-tracker"
 readonly RECOVERY_COMMAND="${PRIVILEGED_EXECUTABLE_DIRECTORY}/recover-car-plate-tracker"
 readonly PINNED_ORIGIN=https://github.com/jaem1n207/naver-smartstore-car-plate-tracker.git
+readonly RUNTIME_SERVICE=car-plate-tracker.service
+if [[ ${CARPLATE_TEST_MODE:-} == 1 ]]; then
+  BOOTSTRAP_HEALTH_SECONDS=0
+else
+  BOOTSTRAP_HEALTH_SECONDS=5
+fi
+readonly BOOTSTRAP_HEALTH_SECONDS
 
 die() {
   printf '%s\n' "$*" >&2
@@ -82,6 +90,95 @@ validate_bootstrap_source_boundaries() {
     [[ $source != "$APP_ROOT" && $source != "$APP_ROOT/"* ]] ||
       die 'bootstrap sources must remain outside the managed application root'
   done
+}
+
+validate_reviewed_source_boundary() {
+  [[ -d $REVIEWED_SCRIPT_DIRECTORY && ! -L $REVIEWED_SCRIPT_DIRECTORY ]] ||
+    die 'reviewed bootstrap source must be a real directory'
+  if [[ ${CARPLATE_TEST_MODE:-} != 1 ]]; then
+    [[ $REVIEWED_SCRIPT_DIRECTORY == "$DEPLOYMENT_DIRECTORY" ]] ||
+      die 'bootstrap must execute from the reviewed deployment source'
+  fi
+
+  python3 -c '
+import os
+import stat
+import sys
+
+root = os.path.abspath(sys.argv[1])
+expected_uid = int(sys.argv[2])
+trust_root = os.path.abspath(sys.argv[3])
+if os.path.realpath(trust_root) != trust_root or os.path.commonpath((trust_root, root)) != trust_root:
+    raise SystemExit(1)
+
+ancestor = root
+while True:
+    metadata = os.lstat(ancestor)
+    if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or metadata.st_uid != expected_uid or stat.S_IMODE(metadata.st_mode) & 0o022:
+        raise SystemExit(1)
+    if ancestor == trust_root:
+        break
+    parent = os.path.dirname(ancestor)
+    if parent == ancestor:
+        raise SystemExit(1)
+    ancestor = parent
+
+for current, directories, files in os.walk(root, followlinks=False):
+    for path in [current, *(os.path.join(current, name) for name in directories + files)]:
+        metadata = os.lstat(path)
+        if stat.S_ISLNK(metadata.st_mode) or metadata.st_uid != expected_uid or stat.S_IMODE(metadata.st_mode) & 0o022:
+            raise SystemExit(1)
+' "$REVIEWED_SCRIPT_DIRECTORY" "$EUID" "$REVIEWED_SOURCE_TRUST_ROOT" ||
+    die 'reviewed bootstrap source must be owner-controlled and immutable'
+
+  validate_reviewed_sources
+}
+
+verify_bootstrap_startup_record() {
+  [[ $# -eq 1 ]] || return 1
+  local invocation=$1
+  local revision
+  revision=$(read_current_sha) || return 1
+
+  journalctl --no-pager --output=cat "_SYSTEMD_INVOCATION_ID=$invocation" 2>/dev/null | python3 -c '
+import json
+import shlex
+import sys
+
+environment_path, expected_revision = sys.argv[1:]
+expected = {"NAVER_API_MODE": "live", "SYNC_CRON": "*/5 * * * *"}
+with open(environment_path, encoding="utf-8") as environment:
+    for raw_line in environment:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, raw_value = line.partition("=")
+        if not separator or key not in expected:
+            continue
+        value = raw_value.strip()
+        if value[:1] in (chr(34), chr(39)):
+            values = shlex.split(value, comments=True, posix=True)
+            value = values[0] if values else ""
+        expected[key] = value
+
+found = False
+for raw_line in sys.stdin:
+    try:
+        record = json.loads(raw_line)
+    except (json.JSONDecodeError, TypeError):
+        continue
+    if (
+        isinstance(record, dict)
+        and record.get("msg") == "scheduler started"
+        and record.get("mode") == expected["NAVER_API_MODE"]
+        and record.get("cron") == expected["SYNC_CRON"]
+        and record.get("appRevision") == expected_revision
+    ):
+        found = True
+raise SystemExit(0 if found else 1)
+' "$ENVIRONMENT_DESTINATION" "$revision"
 }
 
 ensure_group() {
@@ -227,9 +324,13 @@ install_ssh_restrictions() {
     "command=\"${DEPLOY_ENTRYPOINT}\",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding ${key_line}"$'\n'
   write_managed_file "$SSHD_DROPIN" 0644 root "Match User ${CARPLATE_DEPLOY_USER}
     AuthorizedKeysFile ${AUTHORIZED_KEYS}
+    AuthorizedKeysCommand none
+    TrustedUserCAKeys none
     AuthenticationMethods publickey
     PasswordAuthentication no
     KbdInteractiveAuthentication no
+    ForceCommand ${DEPLOY_ENTRYPOINT}
+    DisableForwarding yes
     PermitTTY no
     AllowTcpForwarding no
     X11Forwarding no
@@ -241,9 +342,13 @@ Match all
   effective_policy=$(sshd -T -C "user=${CARPLATE_DEPLOY_USER},host=localhost,addr=127.0.0.1" -f "$SSHD_CONFIG")
   for expected in \
     "authorizedkeysfile ${AUTHORIZED_KEYS}" \
+    'authorizedkeyscommand none' \
+    'trustedusercakeys none' \
     'authenticationmethods publickey' \
     'passwordauthentication no' \
     'kbdinteractiveauthentication no' \
+    "forcecommand ${DEPLOY_ENTRYPOINT}" \
+    'disableforwarding yes' \
     'permittty no' \
     'allowtcpforwarding no' \
     'x11forwarding no' \
@@ -531,6 +636,10 @@ establish_initial_known_good_release() {
 }
 
 main() {
+  local previous_invocation=
+  local current_invocation
+  local service_was_active=0
+
   require_absolute_path "$APP_ROOT" || die 'CARPLATE_APP_ROOT must be an absolute normalized path'
   require_absolute_path "$STATE_ROOT" || die 'CARPLATE_STATE_ROOT must be an absolute normalized path'
   require_absolute_path "$ETC_DIRECTORY" || die 'CARPLATE_ETC_DIR must be an absolute normalized path'
@@ -543,6 +652,15 @@ main() {
   require_absolute_path "$AUTHORIZED_KEYS" || die 'CARPLATE_AUTHORIZED_KEYS must be an absolute normalized path'
   require_absolute_path "$SUDOERS_FILE" || die 'CARPLATE_SUDOERS_FILE must be an absolute normalized path'
   validate_bootstrap_source_boundaries
+  validate_reviewed_source_boundary
+
+  if systemctl is-active --quiet "$RUNTIME_SERVICE"; then
+    service_was_active=1
+    previous_invocation=$(systemctl show "$RUNTIME_SERVICE" --property=InvocationID --value) ||
+      die 'cannot read the active scheduler invocation before bootstrap'
+    [[ $previous_invocation =~ ^[0-9a-f]{32}$ ]] ||
+      die 'active scheduler has an invalid invocation identifier'
+  fi
 
   ensure_group "$CARPLATE_RUNTIME_USER"
   ensure_group "$CARPLATE_BUILD_USER"
@@ -565,7 +683,46 @@ main() {
   install_systemd_units
   establish_initial_known_good_release
 
-  systemctl enable --now car-plate-tracker.service
+  systemctl enable "$RUNTIME_SERVICE"
+  if [[ $service_was_active -eq 1 ]]; then
+    systemctl restart "$RUNTIME_SERVICE"
+  else
+    systemctl start "$RUNTIME_SERVICE"
+  fi
+  systemctl is-active --quiet "$RUNTIME_SERVICE" || die 'scheduler did not become active after bootstrap'
+  current_invocation=$(systemctl show "$RUNTIME_SERVICE" --property=InvocationID --value) ||
+    die 'cannot read the scheduler invocation after bootstrap'
+  [[ $current_invocation =~ ^[0-9a-f]{32}$ ]] ||
+    die 'scheduler has an invalid invocation identifier after bootstrap'
+  [[ -z $previous_invocation || $current_invocation != "$previous_invocation" ]] ||
+    die 'bootstrap did not create a new scheduler invocation'
+
+  local baseline_restarts
+  local observed_invocation
+  local observed_restarts
+  local elapsed=0
+  local startup_record_seen=0
+  baseline_restarts=$(systemctl show "$RUNTIME_SERVICE" --property=NRestarts --value) ||
+    die 'cannot read the scheduler restart count after bootstrap'
+  [[ $baseline_restarts =~ ^[0-9]+$ ]] ||
+    die 'scheduler has an invalid restart count after bootstrap'
+  while (( elapsed <= BOOTSTRAP_HEALTH_SECONDS )); do
+    systemctl is-active --quiet "$RUNTIME_SERVICE" ||
+      die 'scheduler did not remain active after bootstrap'
+    observed_invocation=$(systemctl show "$RUNTIME_SERVICE" --property=InvocationID --value) ||
+      die 'cannot verify the scheduler invocation after bootstrap'
+    observed_restarts=$(systemctl show "$RUNTIME_SERVICE" --property=NRestarts --value) ||
+      die 'cannot verify the scheduler restart count after bootstrap'
+    [[ $observed_invocation == "$current_invocation" && $observed_restarts == "$baseline_restarts" ]] ||
+      die 'scheduler restarted during bootstrap health verification'
+    if verify_bootstrap_startup_record "$current_invocation"; then
+      startup_record_seen=1
+    fi
+    (( elapsed == BOOTSTRAP_HEALTH_SECONDS )) && break
+    sleep 1
+    ((elapsed += 1))
+  done
+  [[ $startup_record_seen -eq 1 ]] || die 'scheduler startup readiness record was not observed'
 }
 
 main "$@"

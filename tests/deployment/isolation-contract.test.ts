@@ -78,6 +78,12 @@ describe("deployment isolation contract", () => {
     expect(sshdPolicy).toContain("X11Forwarding no");
     expect(sshdPolicy).toContain("PermitUserRC no");
     expect(sshdPolicy).toMatch(/ {4}GatewayPorts no\nMatch all\n$/);
+    expect(sshdPolicy).toContain(
+      `ForceCommand ${join(fixture.privilegedExecutableDirectory, "car-plate-tracker-deploy-entrypoint")}`,
+    );
+    expect(sshdPolicy).toContain("DisableForwarding yes");
+    expect(sshdPolicy).toContain("AuthorizedKeysCommand none");
+    expect(sshdPolicy).toContain("TrustedUserCAKeys none");
     await expect(readFile(fixture.sudoersFile, "utf8")).resolves.toContain(
       `${join(fixture.privilegedExecutableDirectory, "deploy-car-plate-tracker")} ^[0-9a-f]{40}$`,
     );
@@ -122,7 +128,8 @@ describe("deployment isolation contract", () => {
     );
     expect(commands).toContain("systemctl reload ssh.service");
     expect(commands).toContain("systemctl daemon-reload");
-    expect(commands).toContain("systemctl enable --now car-plate-tracker.service");
+    expect(commands).toContain("systemctl enable car-plate-tracker.service");
+    expect(commands).toContain("systemctl start car-plate-tracker.service");
     expect(
       commands.some((command) => command.includes(" /etc/") || command.includes(" /var/lib/")),
     ).toBe(false);
@@ -150,6 +157,7 @@ describe("deployment isolation contract", () => {
     expect(
       repeatedCommands.filter((command) => command === "systemctl reload ssh.service"),
     ).toHaveLength(2);
+    expect(repeatedCommands).toContain("systemctl restart car-plate-tracker.service");
     for (const user of ["carplate", "carplate-build", "carplate-deploy"]) {
       expect(repeatedCommands.filter((command) => command === `id -u ${user}`)).toHaveLength(2);
       expect(repeatedCommands.filter((command) => command === `id -gn ${user}`)).toHaveLength(2);
@@ -197,6 +205,50 @@ describe("deployment isolation contract", () => {
       "bootstrap sources must remain outside the managed application root",
     );
   });
+
+  it("rejects a reviewed source beneath a group-writable ancestor", async () => {
+    const fixture = await createBootstrapFixture();
+    await chmod(fixture.temporaryDirectory, 0o770);
+
+    const result = await runBootstrap(fixture);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(
+      "reviewed bootstrap source must be owner-controlled and immutable",
+    );
+  });
+
+  it("rejects a scheduler that is active only for the first post-start sample", async () => {
+    const fixture = await createBootstrapFixture();
+    await writeFile(join(fixture.accountStateDirectory, "systemctl-transient-active"), "1\n");
+
+    const result = await runBootstrap(fixture);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("scheduler did not remain active after bootstrap");
+  }, 15_000);
+
+  it("rejects an active scheduler without the expected startup readiness record", async () => {
+    const fixture = await createBootstrapFixture();
+    await writeFile(join(fixture.accountStateDirectory, "systemctl-startup-not-ready"), "1\n");
+
+    const result = await runBootstrap(fixture);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("scheduler startup readiness record was not observed");
+  }, 15_000);
+
+  it("rejects a writable reviewed bootstrap source", async () => {
+    const fixture = await createBootstrapFixture();
+    await chmod(fixture.reviewedScriptDirectory, 0o777);
+
+    const result = await runBootstrap(fixture);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(
+      "reviewed bootstrap source must be owner-controlled and immutable",
+    );
+  }, 15_000);
 
   it("seals a secretless initial release before enabling the scheduler and preserves it on repeat", async () => {
     const fixture = await createBootstrapFixture();
@@ -261,8 +313,14 @@ describe("deployment isolation contract", () => {
 
     const commands = await readCommands(fixture.commandLog);
     expect(
-      commands.filter((command) => command === "systemctl enable --now car-plate-tracker.service"),
+      commands.filter((command) => command === "systemctl enable car-plate-tracker.service"),
     ).toHaveLength(2);
+    expect(
+      commands.filter((command) => command === "systemctl start car-plate-tracker.service"),
+    ).toHaveLength(1);
+    expect(
+      commands.filter((command) => command === "systemctl restart car-plate-tracker.service"),
+    ).toHaveLength(1);
     expect(
       commands.some(
         (command) =>
@@ -286,7 +344,7 @@ describe("deployment isolation contract", () => {
     expect(await pathExists(join(fixture.appRoot, "current"))).toBe(false);
 
     const commands = await readCommands(fixture.commandLog);
-    expect(commands).not.toContain("systemctl enable --now car-plate-tracker.service");
+    expect(commands).not.toContain("systemctl enable car-plate-tracker.service");
   }, 15_000);
 
   it("keeps the runtime service confined while permitting Node JIT", async () => {
@@ -578,7 +636,60 @@ case "$(basename "$0")" in
       printf '%s' "$supplementary" > "$account_state/groups-$user"
     fi
     ;;
-  passwd|systemctl|visudo|chown)
+  systemctl)
+    service_state="$account_state/systemctl-active"
+    invocation_state="$account_state/systemctl-invocation"
+    invocation_counter="$account_state/systemctl-invocation-counter"
+    case "$1" in
+      is-active)
+        [[ -f $service_state ]] || exit 1
+        transient_state="$account_state/systemctl-transient-active"
+        if [[ -f $transient_state ]]; then
+          rm -f "$transient_state" "$service_state"
+        fi
+        ;;
+      show)
+        [[ -f $invocation_state ]] || exit 1
+        property=
+        for argument in "$@"; do
+          case "$argument" in
+            --property=*) property="${shellDollar}{argument#--property=}" ;;
+          esac
+        done
+        case "$property" in
+          InvocationID) cat "$invocation_state" ;;
+          NRestarts) printf '0\\n' ;;
+          *) exit 2 ;;
+        esac
+        ;;
+      enable)
+        ;;
+      start|restart)
+        counter=0
+        [[ ! -f $invocation_counter ]] || counter=$(<"$invocation_counter")
+        counter=$((counter + 1))
+        printf '%s\n' "$counter" >"$invocation_counter"
+        printf '%032x\n' "$counter" >"$invocation_state"
+        : >"$service_state"
+        ;;
+      reload|daemon-reload)
+        ;;
+      *) exit 2 ;;
+    esac
+    ;;
+  journalctl)
+    if [[ -f "$account_state/systemctl-startup-not-ready" ]]; then
+      printf '{}\\n'
+      exit 0
+    fi
+    revision=$(sed -n 's/^APP_REVISION=//p' "$CARPLATE_APP_ROOT/current/release.env")
+    cron=$(sed -n 's/^SYNC_CRON=//p' "$CARPLATE_ETC_DIR/app.env")
+    mode=$(sed -n 's/^NAVER_API_MODE=//p' "$CARPLATE_ETC_DIR/app.env")
+    [[ -n $cron ]] || cron='*/5 * * * *'
+    printf '{"level":30,"cron":"%s","mode":"%s","appRevision":"%s","msg":"scheduler started"}\\n' \
+      "$cron" "$mode" "$revision"
+    ;;
+  passwd|visudo|chown)
     ;;
   sshd)
     config="${shellDollar}{!#}"
@@ -616,6 +727,7 @@ esac
       "usermod",
       "passwd",
       "systemctl",
+      "journalctl",
       "visudo",
       "sshd",
       "install",
@@ -646,6 +758,7 @@ async function runBootstrap(fixture: BootstrapFixture): Promise<ProcessResult> {
     CARPLATE_SYSTEMD_DIR: join(fixture.temporaryDirectory, "systemd"),
     CARPLATE_TEST_COMMAND_PATH: fixture.shimDirectory,
     CARPLATE_TEST_MODE: "1",
+    CARPLATE_TEST_SOURCE_TRUST_ROOT: fixture.temporaryDirectory,
     CARPLATE_REVIEWED_SCRIPT_DIR: fixture.reviewedScriptDirectory,
   };
   return await runProcess("bash", [bootstrapScript], environment);
