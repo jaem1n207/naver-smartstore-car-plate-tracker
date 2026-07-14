@@ -263,6 +263,8 @@ bash -n ops/deployment/*.sh ops/deployment/lib/*.sh
 
 Do not continue unless this checkout is already accepted as the current known-good application revision. Bootstrap validates its structure and then enables the scheduler; it does not call the live Naver API or write the production Sheet as a preflight test.
 
+The checkout remains owned by `carplate-build`. During bootstrap, the root process scopes Git's `safe.directory` exception to this exact `CARPLATE_INITIAL_RELEASE_SOURCE` for the two read-only revision checks. Do not add a global `safe.directory` entry or use the `*` wildcard to bypass Git's ownership protection.
+
 The build account owns this secretless checkout, so root must not execute bootstrap from it. Fetch the same PR head independently into a root-only bare repository, export only `ops/deployment`, and make that reviewed source immutable. This prevents repository or dependency code from replacing a privileged script or systemd unit before bootstrap.
 
 **[Oracle]**
