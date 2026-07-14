@@ -6,9 +6,12 @@ Node.js and TypeScript worker for syncing registered Naver Smartstore products, 
 
 Local development uses mock Naver data by default.
 
-Use Node.js 22.13 or newer.
+Use Node.js `22.23.1` and pnpm `11.10.0`, matching `.node-version`, `package.json`, and CI.
+
+**[MacBook]**
 
 ```bash
+# [MacBook]
 corepack enable
 pnpm install
 pnpm test
@@ -37,14 +40,15 @@ See [Google service account setup](docs/operations/google-service-account.md) fo
 
 ## Server Operation
 
-Use a fixed public IP server for live Naver Commerce API calls.
+Production uses a fixed-IP Oracle VM, Node.js `22.23.1`, pnpm `11.10.0`, immutable compiled releases, and the built-in scheduler under hardened systemd. It does not run `tsx` or `pnpm scheduler` in production.
 
-Recommended first deployment:
+Follow the ordered [automatic production deployment runbook](docs/operations/automatic-production-deployment.md) for backup, moving the existing `/opt` checkout to `/srv/carplate-bootstrap-source`, persistent 2 GiB swap, exact runtime installation, the initial built checkout, dedicated users, secret migration, forced deploy key, GitHub `production` environment, branch protection, first deployment, reboot verification, rollback drill, rotation, and diagnostics. The currently open deployment PR is **#2**.
 
-- Oracle Cloud Free Tier VM
-- Node.js 22.13 or newer
-- systemd service and timer, or the built-in scheduler process
-- Google service account shared with the target spreadsheet
+PR #2 must be merged with **Create a merge commit**, not squash merge or rebase merge. Bootstrap records the PR head as the initial deployed SHA, and the monotonic deployer requires the new `main` revision to be its descendant.
+
+After the one-time privileged bootstrap, merging a verified PR into `main` is the normal deployment. GitHub-hosted runners build and connect directly to Oracle, so the developer's MacBook may be off. Routine `main` deployments do not update root-owned deployment scripts, systemd units, SSH policy, sudoers, or `/etc` secrets; those changes require an explicit reviewed bootstrap-maintenance operation.
+
+systemd keeps the scheduler enabled across VM reboots and runs deployment recovery before startup. It cannot guarantee Oracle power, network, Naver, Google, DNS, credentials, disk space, or successful sync jobs. See the shorter [Oracle systemd operations reference](docs/operations/oracle-cloud-systemd.md) and use the [fixed-IP live smoke test](docs/operations/live-smoke-test.md) for real external verification.
 
 ## Product Status Policy
 
