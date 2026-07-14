@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@fontsource-variable/noto-sans-kr": "^5.2.10",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/cli": "^4.3.2",
     "@types/he": "^1.2.3",
@@ -54,6 +55,7 @@
     "tsx": "^4.23.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.63.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "yaml": "^2.9.0"
   }
 }
