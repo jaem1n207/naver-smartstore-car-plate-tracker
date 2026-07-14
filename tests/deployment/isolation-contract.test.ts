@@ -37,6 +37,12 @@ describe("deployment isolation contract", () => {
       process.umask(previousUmask);
     });
 
+    for (const relativePath of ["lib/common.sh", "atomic_fs.py"]) {
+      expect((await stat(join(fixture.reviewedScriptDirectory, relativePath))).mode & 0o777).toBe(
+        0o600,
+      );
+    }
+
     const result = await runBootstrap(fixture);
 
     expect(result.code, result.stderr).toBe(0);
@@ -515,6 +521,10 @@ async function writeReviewedScripts(directory: string): Promise<void> {
       join(directory, "lib", "common.sh"),
     ),
     copyFile(join(repositoryRoot, "ops/deployment/atomic_fs.py"), join(directory, "atomic_fs.py")),
+  ]);
+  await Promise.all([
+    chmod(join(directory, "lib", "common.sh"), 0o600),
+    chmod(join(directory, "atomic_fs.py"), 0o600),
   ]);
 }
 
