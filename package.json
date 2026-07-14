@@ -18,7 +18,9 @@
     "test:visual": "pnpm build:visual-css && playwright test tests/visual",
     "test:watch": "vitest",
     "sync:once": "tsx src/cli/sync-once.ts",
-    "scheduler": "tsx src/scheduler/main.ts"
+    "sync:once:production": "node dist/src/cli/sync-once.js",
+    "scheduler": "tsx src/scheduler/main.ts",
+    "scheduler:production": "node dist/src/scheduler/main.js"
   },
   "engines": {
     "node": ">=22.13"

@@ -8,7 +8,9 @@ import { LiveNaverCommerceClient } from "../naver/client.js";
 import { MockNaverCommerceClient } from "../naver/mock-client.js";
 import { GoogleSheetRepository } from "../sheets/google-repository.js";
 import { InMemorySheetRepository } from "../sheets/in-memory-repository.js";
-import { runSyncJob } from "../sync/sync-job.js";
+import { createScheduler, registerSchedulerShutdownHandlers } from "./scheduler.js";
+import type { SchedulerLogger } from "./scheduler.js";
+import { runLockedSyncJob } from "../sync/run-locked-sync-job.js";
 
 function main(): void {
   const env = loadEnv();
@@ -29,35 +31,42 @@ function main(): void {
         })
       : new InMemorySheetRepository();
   const secrets = runtimeSecrets(env);
-
-  let running = false;
-
-  cron.schedule(env.syncCron, async () => {
-    if (running) {
-      logger.warn("previous sync is still running");
-      return;
-    }
-
-    running = true;
-
-    try {
-      const result = await runSyncJob({
-        env,
-        stores,
-        naverClient,
-        sheetRepository,
-        now: () => new Date(),
-      });
-
-      logger.info(result, "scheduled sync completed");
-    } catch (error) {
-      logger.error({ error: safeErrorLog(error, secrets) }, "scheduled sync failed");
-    } finally {
-      running = false;
-    }
+  const schedulerLogger: SchedulerLogger = {
+    error: (bindings, message) => {
+      logger.error({ ...bindings, error: safeErrorLog(bindings.error, secrets) }, message);
+    },
+    info: (bindings, message) => {
+      logger.info(bindings, message);
+    },
+    warn: (bindings, message) => {
+      logger.warn(bindings, message);
+    },
+  };
+  const controller = createScheduler({
+    appRevision: env.appRevision,
+    cron: env.syncCron,
+    logger: schedulerLogger,
+    mode: env.naverApiMode,
+    runSync: () =>
+      runLockedSyncJob(
+        {
+          env,
+          stores,
+          naverClient,
+          sheetRepository,
+          now: () => new Date(),
+        },
+        { lockDir: env.syncLockDir },
+      ),
+    schedule: (expression, callback) => cron.schedule(expression, callback),
   });
 
-  logger.info({ cron: env.syncCron, mode: env.naverApiMode }, "scheduler started");
+  registerSchedulerShutdownHandlers({
+    controller,
+    onError: (signal, error) => {
+      logger.error({ error: safeErrorLog(error, secrets), signal }, "scheduler shutdown failed");
+    },
+  });
 }
 
 try {
