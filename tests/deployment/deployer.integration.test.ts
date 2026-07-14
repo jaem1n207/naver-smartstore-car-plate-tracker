@@ -91,6 +91,25 @@ describe("deployment request validation and monotonic revisions", () => {
     }
     expect(systemdRun).toContain("--setenv=npm_config_registry=https://registry.npmjs.org/");
     expect(systemdRun).toContain("--setenv=npm_config_strict_ssl=true");
+
+    const fetchInvocation = systemdRun
+      .split("\n")
+      .find((line) => line.includes("--unit=carplate-fetch-"));
+    expect(fetchInvocation).toBeDefined();
+    for (const deniedRange of [
+      "127.0.0.0/8",
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+      "169.254.0.0/16",
+      "::1/128",
+      "fc00::/7",
+      "fe80::/10",
+    ]) {
+      expect(fetchInvocation).toContain(`--property=IPAddressDeny=${deniedRange}`);
+    }
+    expect(fetchInvocation).toContain("--property=IPAddressAllow=127.0.0.53/32");
+    expect(fetchInvocation).toContain("--property=IPAddressAllow=::1/128");
   });
 
   it("deploys only forward revisions and treats equal or stale requests as successful no-ops", async () => {

@@ -362,6 +362,16 @@ _deploy_fetch_dependencies() {
     --property=PrivateTmp=true \
     --property=TemporaryFileSystem=/tmp:size=256M,nr_inodes=65536,mode=1777 \
     --property=NoNewPrivileges=true \
+    --property=IPAddressAllow=127.0.0.53/32 \
+    --property=IPAddressAllow=::1/128 \
+    --property=IPAddressDeny=127.0.0.0/8 \
+    --property=IPAddressDeny=10.0.0.0/8 \
+    --property=IPAddressDeny=172.16.0.0/12 \
+    --property=IPAddressDeny=192.168.0.0/16 \
+    --property=IPAddressDeny=169.254.0.0/16 \
+    --property=IPAddressDeny=::1/128 \
+    --property=IPAddressDeny=fc00::/7 \
+    --property=IPAddressDeny=fe80::/10 \
     --property="ReadWritePaths=$candidate" \
     --property="ReadWritePaths=$package_store" \
     --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
