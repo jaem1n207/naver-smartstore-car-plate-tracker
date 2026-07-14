@@ -58,7 +58,7 @@ _close_inherited_descriptors() {
   local flags
 
   [[ -d /proc/$$/fd ]] || return 0
-  for descriptor_path in /proc/$$/fd/*; do
+  for descriptor_path in "/proc/$$/fd/"*; do
     descriptor=${descriptor_path##*/}
     [[ $descriptor =~ ^[0-9]+$ && $descriptor -gt 2 ]] || continue
     flags=$(awk '$1 == "flags:" { print $2 }' "/proc/$$/fdinfo/$descriptor" 2>/dev/null) || continue

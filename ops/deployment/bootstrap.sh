@@ -20,8 +20,10 @@ else
 fi
 export PATH
 
-readonly DEPLOYMENT_DIRECTORY=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-readonly REPOSITORY_ROOT=$(cd -- "${DEPLOYMENT_DIRECTORY}/../.." && pwd -P)
+DEPLOYMENT_DIRECTORY=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+readonly DEPLOYMENT_DIRECTORY
+REPOSITORY_ROOT=$(cd -- "${DEPLOYMENT_DIRECTORY}/../.." && pwd -P)
+readonly REPOSITORY_ROOT
 readonly APP_ROOT=${CARPLATE_APP_ROOT:-/opt/naver-smartstore-car-plate-tracker}
 readonly STATE_ROOT=${CARPLATE_STATE_ROOT:-/var/lib/naver-smartstore-car-plate-tracker}
 readonly ETC_DIRECTORY=${CARPLATE_ETC_DIR:-/etc/naver-smartstore-car-plate-tracker}
@@ -189,14 +191,14 @@ install_ssh_restrictions() {
   local key_line
   local key_type
   local key_blob
-  local key_comment
+  local _key_comment
   local key_lines
 
   key_lines=$(wc -l < "$AUTHORIZED_KEY_SOURCE")
   key_lines=${key_lines//[[:space:]]/}
   [[ $key_lines == 1 ]] || die 'deploy key must contain exactly one line'
   key_line=$(<"$AUTHORIZED_KEY_SOURCE")
-  read -r key_type key_blob key_comment <<< "$key_line"
+  read -r key_type key_blob _key_comment <<< "$key_line"
   [[ $key_type =~ ^(ssh-ed25519|sk-ssh-ed25519@openssh\.com|ecdsa-sha2-nistp256|ssh-rsa)$ ]] ||
     die 'deploy key type is not permitted'
   [[ $key_blob =~ ^[A-Za-z0-9+/=]+$ ]] || die 'deploy key payload is malformed'
@@ -310,6 +312,7 @@ initial_source_sha() {
 validate_with_reviewed_common() {
   local candidate=$1
   (
+    # shellcheck source=ops/deployment/lib/common.sh
     source "${SCRIPT_DIRECTORY}/lib/common.sh"
     validate_candidate_tree "$candidate"
   )
