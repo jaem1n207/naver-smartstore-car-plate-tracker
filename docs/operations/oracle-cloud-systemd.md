@@ -88,22 +88,13 @@ Updating deployment scripts, units, secrets, deploy keys, SSH policy, or sudoers
 
 ## Manual one-time synchronization
 
-The scheduler and compiled CLI share the same cross-process lock. Stop the scheduler to prevent a new cron trigger, run the CLI in a transient unit using the production environment, then restart the scheduler.
+The scheduler and compiled CLI share the same cross-process lock. Stop the scheduler to prevent a new cron trigger, run the CLI in a transient unit using the production environment, then restart the scheduler. Use the canonical runbook's EXIT-trapped command so a failed CLI cannot leave the scheduler stopped. Bootstrap and deployment both reject transient starts by checking a stable systemd invocation and unchanged restart count over a bounded health window.
 
 **[Oracle]**
 
 ```bash
 # [Oracle]
-sudo systemctl stop car-plate-tracker.service
-sudo systemd-run --wait --collect --service-type=exec \
-  --uid=carplate \
-  --gid=carplate \
-  --working-directory=/opt/naver-smartstore-car-plate-tracker/current \
-  --property=EnvironmentFile=/etc/naver-smartstore-car-plate-tracker/app.env \
-  --property=EnvironmentFile=-/opt/naver-smartstore-car-plate-tracker/current/release.env \
-  /usr/bin/node /opt/naver-smartstore-car-plate-tracker/current/dist/src/cli/sync-once.js
-sudo systemctl start car-plate-tracker.service
-sudo systemctl is-active car-plate-tracker.service
+See [Routine deployment and manual operations](automatic-production-deployment.md#15-routine-deployment-and-manual-operations) and run its complete `sudo /usr/bin/bash` block.
 ```
 
 Do not manually delete `sync.lock`. The lock owner contract supports verified stale-owner recovery and fails closed on malformed or unexpected contents.

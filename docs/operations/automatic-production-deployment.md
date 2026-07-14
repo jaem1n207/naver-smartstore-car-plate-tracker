@@ -35,6 +35,8 @@ Set the current and destination checkout paths. At this point the existing check
 # [Oracle]
 export CURRENT_CHECKOUT="/opt/naver-smartstore-car-plate-tracker"
 export BOOTSTRAP_SOURCE="/srv/carplate-bootstrap-source"
+export INITIAL_RELEASE_SOURCE="/srv/carplate-initial-release-source"
+export INITIAL_PACKAGE_STORE="/srv/carplate-initial-package-store"
 export ENV_SOURCE="$CURRENT_CHECKOUT/.env"
 export GOOGLE_JSON_SOURCE="$CURRENT_CHECKOUT/google-service-account.json"
 ```
@@ -179,39 +181,109 @@ test "$(/usr/bin/node --version)" = "v22.23.1"
 test "$(/usr/local/bin/pnpm --version)" = "11.10.0"
 ```
 
-## 6. Fast-forward the PR branch and prepare the initial built checkout
+## 6. Prepare a secretless initial built checkout
 
 Bootstrap does not run `pnpm install` or `pnpm build` for the initial release. It requires a Git checkout root outside `APP_ROOT` containing `package.json`, `node_modules`, `dist/src/scheduler/main.js`, and a lowercase 40-character `HEAD` SHA. It copies only the built runtime, dependencies, package manifest, optional lockfile, and a generated non-secret `release.env`; it does not copy `.env`, `.git`, or the Google credential into the release.
 
-The checkout must exactly match the latest remote PR branch. A dirty checkout or a non-fast-forward update is a stop condition.
+This is the only PR-before-merge production exception. Continue only when PR #2's `Verify` check is green, all independent code/security/operator reviews are resolved, the exact head SHA below is unchanged, and the repository owner has explicitly approved this migration. Routine pull requests never use this path.
+
+The initial checkout must be a fresh clone containing no `.env`, Google key, exported production data, or untracked files. Create the build identity before bootstrap, clone the exact reviewed PR head as that identity, fetch packages with lifecycle scripts disabled, install from the fetched cache offline, run verification and build, then prune development dependencies. Do not build from the moved legacy checkout.
 
 **[Oracle]**
 
 ```bash
 # [Oracle]
-cd "$CURRENT_CHECKOUT"
-test -z "$(sudo -u carplate -H git status --porcelain)"
-sudo -u carplate -H git fetch origin naver-smartstore-car-plate-tracker-mvp
-sudo -u carplate -H git switch naver-smartstore-car-plate-tracker-mvp
-sudo -u carplate -H git merge --ff-only origin/naver-smartstore-car-plate-tracker-mvp
-test "$(sudo -u carplate -H git rev-parse HEAD)" = "$(sudo -u carplate -H git rev-parse origin/naver-smartstore-car-plate-tracker-mvp)"
-export INITIAL_DEPLOYED_SHA="$(sudo -u carplate -H git rev-parse HEAD)"
+sudo getent group carplate-build >/dev/null 2>&1 || sudo groupadd --system carplate-build
+if ! id -u carplate-build >/dev/null 2>&1; then
+  sudo useradd --system --gid carplate-build --home-dir /nonexistent --no-create-home \
+    --shell /usr/sbin/nologin carplate-build
+fi
+sudo test ! -e "$INITIAL_RELEASE_SOURCE"
+sudo install -d -m 0755 -o carplate-build -g carplate-build "$INITIAL_RELEASE_SOURCE"
+sudo install -d -m 0700 -o carplate-build -g carplate-build "$INITIAL_PACKAGE_STORE"
+sudo -u carplate-build -H git clone --branch naver-smartstore-car-plate-tracker-mvp \
+  --single-branch https://github.com/jaem1n207/naver-smartstore-car-plate-tracker.git \
+  "$INITIAL_RELEASE_SOURCE"
+cd "$INITIAL_RELEASE_SOURCE"
+test -z "$(sudo -u carplate-build -H git status --porcelain)"
+sudo -u carplate-build -H git fetch origin naver-smartstore-car-plate-tracker-mvp
+sudo -u carplate-build -H git merge --ff-only origin/naver-smartstore-car-plate-tracker-mvp
+test "$(sudo -u carplate-build -H git rev-parse HEAD)" = \
+  "$(sudo -u carplate-build -H git rev-parse origin/naver-smartstore-car-plate-tracker-mvp)"
+export INITIAL_DEPLOYED_SHA="$(sudo -u carplate-build -H git rev-parse HEAD)"
 printf '%s\n' "$INITIAL_DEPLOYED_SHA" | grep -Ex '[0-9a-f]{40}'
-sudo -u carplate -H /usr/local/bin/pnpm install --frozen-lockfile
-sudo -u carplate -H /usr/local/bin/pnpm build
+test ! -e .env
+test ! -e google-service-account.json
+if grep -Eiq '(https?://|git\+|tarball:)' pnpm-lock.yaml; then exit 1; fi
+sudo systemd-run --wait --collect --service-type=exec \
+  --uid=carplate-build --gid=carplate-build --working-directory="$INITIAL_RELEASE_SOURCE" \
+  --property=MemoryMax=600M --property=MemorySwapMax=1G --property=TasksMax=64 \
+  --property=LimitFSIZE=536870912 --property=ProtectSystem=strict --property=ProtectHome=true \
+  --property=PrivateTmp=true --property=NoNewPrivileges=true \
+  --property=IPAddressDeny=127.0.0.0/8 --property=IPAddressDeny=10.0.0.0/8 \
+  --property=IPAddressDeny=172.16.0.0/12 --property=IPAddressDeny=192.168.0.0/16 \
+  --property=IPAddressDeny=169.254.0.0/16 --property=IPAddressDeny=::1/128 \
+  --property=IPAddressDeny=fc00::/7 --property=IPAddressDeny=fe80::/10 \
+  --property="ReadWritePaths=$INITIAL_RELEASE_SOURCE" \
+  --property="ReadWritePaths=$INITIAL_PACKAGE_STORE" \
+  --setenv="HOME=$INITIAL_PACKAGE_STORE/home" \
+  --setenv="PNPM_HOME=$INITIAL_PACKAGE_STORE/pnpm-home" \
+  --setenv="PNPM_STORE_DIR=$INITIAL_PACKAGE_STORE/store" \
+  --setenv=npm_config_registry=https://registry.npmjs.org/ --setenv=npm_config_strict_ssl=true \
+  /usr/local/bin/pnpm fetch --frozen-lockfile --ignore-scripts
+sudo systemd-run --wait --collect --service-type=exec \
+  --uid=carplate-build --gid=carplate-build --working-directory="$INITIAL_RELEASE_SOURCE" \
+  --property=MemoryMax=900M --property=MemorySwapMax=2G --property=TasksMax=128 \
+  --property=LimitFSIZE=536870912 --property=ProtectSystem=strict --property=ProtectHome=true \
+  --property=PrivateTmp=true --property=PrivateNetwork=true --property=NoNewPrivileges=true \
+  --property="ReadWritePaths=$INITIAL_RELEASE_SOURCE" \
+  --property="ReadWritePaths=$INITIAL_PACKAGE_STORE" \
+  --setenv="HOME=$INITIAL_PACKAGE_STORE/home" \
+  --setenv="PNPM_HOME=$INITIAL_PACKAGE_STORE/pnpm-home" \
+  --setenv="PNPM_STORE_DIR=$INITIAL_PACKAGE_STORE/store" \
+  /usr/bin/bash -Eeuo pipefail -c \
+  '/usr/local/bin/pnpm install --offline --frozen-lockfile --ignore-scripts &&
+   /usr/local/bin/pnpm test:deployment &&
+   /usr/local/bin/pnpm build &&
+   /usr/local/bin/pnpm prune --prod'
 /usr/bin/node --check dist/src/scheduler/main.js
 test -d node_modules
 test -f package.json
-sudo -u carplate -H git rev-parse --verify 'HEAD^{commit}' | grep -Ex '[0-9a-f]{40}'
+sudo -u carplate-build -H git rev-parse --verify 'HEAD^{commit}' | grep -Ex '[0-9a-f]{40}'
 bash -n ops/deployment/*.sh ops/deployment/lib/*.sh
-sudo -u carplate -H /usr/local/bin/pnpm test:deployment
 ```
 
 Do not continue unless this checkout is already accepted as the current known-good application revision. Bootstrap validates its structure and then enables the scheduler; it does not call the live Naver API or write the production Sheet as a preflight test.
 
+The build account owns this secretless checkout, so root must not execute bootstrap from it. Fetch the same PR head independently into a root-only bare repository, export only `ops/deployment`, and make that reviewed source immutable. This prevents repository or dependency code from replacing a privileged script or systemd unit before bootstrap.
+
+**[Oracle]**
+
+```bash
+# [Oracle]
+export REVIEWED_REPOSITORY="/root/carplate-reviewed-${INITIAL_DEPLOYED_SHA}.git"
+export REVIEWED_SOURCE="/root/carplate-reviewed-${INITIAL_DEPLOYED_SHA}"
+sudo test ! -e "$REVIEWED_REPOSITORY"
+sudo test ! -e "$REVIEWED_SOURCE"
+sudo git init --bare --quiet "$REVIEWED_REPOSITORY"
+sudo git --git-dir="$REVIEWED_REPOSITORY" remote add origin \
+  https://github.com/jaem1n207/naver-smartstore-car-plate-tracker.git
+sudo git --git-dir="$REVIEWED_REPOSITORY" fetch --depth=1 origin \
+  refs/heads/naver-smartstore-car-plate-tracker-mvp:refs/heads/reviewed
+test "$(sudo git --git-dir="$REVIEWED_REPOSITORY" rev-parse refs/heads/reviewed)" = "$INITIAL_DEPLOYED_SHA"
+sudo install -d -m 0555 -o root -g root "$REVIEWED_SOURCE"
+sudo git --git-dir="$REVIEWED_REPOSITORY" archive "$INITIAL_DEPLOYED_SHA" ops/deployment |
+  sudo tar --extract --directory="$REVIEWED_SOURCE" --no-same-owner
+sudo chown -R root:root "$REVIEWED_SOURCE"
+sudo find "$REVIEWED_SOURCE" -type d -exec chmod 0555 -- {} +
+sudo find "$REVIEWED_SOURCE" -type f -exec chmod 0444 -- {} +
+test -z "$(sudo find "$REVIEWED_SOURCE" \( ! -user root -o -perm /022 -o -type l \) -print -quit)"
+sudo bash -n "$REVIEWED_SOURCE"/ops/deployment/*.sh "$REVIEWED_SOURCE"/ops/deployment/lib/*.sh
+```
+
 ## 7. Create the dedicated deploy key
 
-Generate a new key that is not a personal maintenance key and is not reused elsewhere. The private key remains on the MacBook until it is entered into the GitHub `production` environment.
+Generate a new key that is not a personal maintenance key and is not reused elsewhere. The private key remains on the MacBook until it is entered into the GitHub `production` environment. GitHub Actions cannot answer a passphrase prompt, so this dedicated non-interactive key intentionally has an empty passphrase and is protected by the environment secret plus the server-side forced command.
 
 **[MacBook]**
 
@@ -219,7 +291,7 @@ Generate a new key that is not a personal maintenance key and is not reused else
 # [MacBook]
 umask 077
 test ! -e "$DEPLOY_KEY"
-ssh-keygen -t ed25519 -a 100 -f "$DEPLOY_KEY" -C "github-actions-carplate-production"
+ssh-keygen -t ed25519 -a 100 -N '' -f "$DEPLOY_KEY" -C "github-actions-carplate-production"
 chmod 0600 "$DEPLOY_KEY"
 chmod 0644 "$DEPLOY_KEY.pub"
 scp "$DEPLOY_KEY.pub" "${OCI_MAINTENANCE_USER}@${OCI_DEPLOY_HOST}:/tmp/carplate-deploy.pub"
@@ -277,7 +349,7 @@ It creates and owns these production paths:
 - `/var/lib/naver-smartstore-car-plate-tracker/deployment`: `root:root` mode `0700`; deployment lock, durable marker, and activation state.
 - `/usr/local/sbin` and `/usr/local/lib/naver-smartstore-car-plate-tracker`: installed root-owned deploy, recovery, build, and helper programs.
 
-Run bootstrap from the reviewed checkout. It copies the current environment to `app.env`, removes both Google credential variables from that copy, and adds the protected file path. The destination secret files become `root:carplate` mode `0640`.
+Run bootstrap only from the root-owned immutable reviewed source. It copies the current environment to `app.env`, removes both Google credential variables from that copy, and adds the protected file path. The destination secret files become `root:carplate` mode `0640`.
 
 `CARPLATE_INITIAL_RELEASE_SOURCE` and `CARPLATE_REVIEWED_SCRIPT_DIR` must both resolve outside `/opt/naver-smartstore-car-plate-tracker`. Do not bypass that isolation check.
 
@@ -285,17 +357,19 @@ Run bootstrap from the reviewed checkout. It copies the current environment to `
 
 ```bash
 # [Oracle]
-cd "$CURRENT_CHECKOUT"
+cd /
 sudo env \
   CARPLATE_ENV_SOURCE="$ENV_SOURCE" \
   CARPLATE_GOOGLE_JSON_SOURCE="$GOOGLE_JSON_SOURCE" \
   CARPLATE_AUTHORIZED_KEY_SOURCE=/root/carplate-deploy.pub \
-  CARPLATE_INITIAL_RELEASE_SOURCE="$CURRENT_CHECKOUT" \
-  CARPLATE_REVIEWED_SCRIPT_DIR="$CURRENT_CHECKOUT/ops/deployment" \
-  /usr/bin/bash "$CURRENT_CHECKOUT/ops/deployment/bootstrap.sh"
+  CARPLATE_INITIAL_RELEASE_SOURCE="$INITIAL_RELEASE_SOURCE" \
+  CARPLATE_REVIEWED_SCRIPT_DIR="$REVIEWED_SOURCE/ops/deployment" \
+  /usr/bin/bash "$REVIEWED_SOURCE/ops/deployment/bootstrap.sh"
 ```
 
 Bootstrap is repeat-safe only when existing markers, links, releases, accounts, and source files still satisfy the validated contract. It fails closed on disagreement. Do not delete state merely to make a rerun pass.
+
+On a maintenance rerun, bootstrap records the active scheduler `InvocationID`, installs the reviewed privileged files, explicitly restarts the service, and refuses success unless a different invocation remains active with the same restart count for the bounded five-second bootstrap health window. `enable --now` alone is not treated as proof that an already-running process loaded the new installation.
 
 Verify users, ownership, installed policy, the initial release, and the compiled service without displaying secrets.
 
@@ -403,7 +477,7 @@ pbcopy < "$DEPLOY_KNOWN_HOSTS"
 
 **[GitHub UI]** Merge PR #2 only after bootstrap, environment secrets, and branch protection are complete. Select **Create a merge commit**. Do not select **Squash and merge** or **Rebase and merge**.
 
-The merge commit must contain the initial deployed PR-head SHA as an ancestor. This is not a style preference: the deployer allows only a forward descendant of `deployed-sha`. A squash or rebase merge makes the new `main` tip divergent from the bootstrap marker and the first automatic deployment fails closed.
+The merge commit must contain the initial deployed PR-head SHA as an ancestor. This is not a style preference: the deployer activates only the exact current `main` tip when it is a forward descendant of `deployed-sha`. A squash or rebase merge makes the new `main` tip divergent from the bootstrap marker and the first automatic deployment fails closed.
 
 Wait for the push-to-`main` workflow. That successful push normally performs the first automated deployment, so do not start a concurrent manual run.
 
@@ -477,6 +551,31 @@ sudo swapon --show
 sudo journalctl -b -u car-plate-tracker-recover.service -u car-plate-tracker.service --no-pager --output=cat
 ```
 
+Complete the [fixed-IP live smoke test](live-smoke-test.md). Only after the automated deployment, reboot verification, and live Naver/Google synchronization all pass, destroy the duplicate credential backup. Replace the path below with the exact `BACKUP_DIR` created in Step 2.
+
+**[Oracle]**
+
+```bash
+# [Oracle]
+export BACKUP_DIR="/var/backups/carplate-pre-bootstrap-YYYYMMDDTHHMMSSZ"
+sudo test -f "$BACKUP_DIR/app.env"
+sudo test -f "$BACKUP_DIR/google-service-account.json"
+sudo shred -u -- "$BACKUP_DIR/app.env" "$BACKUP_DIR/google-service-account.json"
+sudo rm -f -- "$BACKUP_DIR/car-plate-tracker.service" "$BACKUP_DIR/checkout-sha"
+sudo rmdir "$BACKUP_DIR"
+```
+
+The dedicated private key is now stored only in the protected GitHub environment and its public half is installed on Oracle. After the automated deployment, reboot verification, and live smoke test have all passed, remove the MacBook copy instead of keeping an undocumented break-glass credential.
+
+**[MacBook]**
+
+```bash
+# [MacBook]
+test -f "$DEPLOY_KEY"
+rm -P -- "$DEPLOY_KEY"
+rm -f -- "$DEPLOY_KEY.pub"
+```
+
 ## 14. Run the rollback and crash-recovery drill
 
 Do not create a deliberately broken production commit and do not manually relink `current` as a beginner exercise. The safe repeatable drill executes the same deployer and recovery sources against isolated temporary Git, filesystem, process, and systemd shims.
@@ -521,22 +620,71 @@ sudo /usr/local/sbin/deploy-car-plate-tracker "$REQUESTED_SHA"
 
 Never stop the service and replace release files by hand for a code deployment.
 
-For a deliberate one-time production sync, stop the scheduler so it cannot create a new cron run, then run the compiled CLI in a transient unit with the same environment and shared `SYNC_LOCK_DIR`. Always restart the scheduler even if the CLI fails.
+For a deliberate one-time production sync, stop the scheduler so it cannot create a new cron run, then run the compiled CLI in a transient unit with the same environment and shared `SYNC_LOCK_DIR`. The EXIT trap below restarts the scheduler and verifies a new invocation even when the CLI fails.
 
 **[Oracle]**
 
 ```bash
 # [Oracle]
-sudo systemctl stop car-plate-tracker.service
-sudo systemd-run --wait --collect --service-type=exec \
+sudo /usr/bin/bash -Eeuo pipefail <<'BASH'
+service=car-plate-tracker.service
+before=$(systemctl show "$service" --property=InvocationID --value)
+restart_scheduler() {
+  status=$?
+  trap - EXIT
+  systemctl start "$service" || exit 1
+  after=$(systemctl show "$service" --property=InvocationID --value) || exit 1
+  [[ $after =~ ^[0-9a-f]{32}$ && $after != "$before" ]] || exit 1
+  baseline_restarts=$(systemctl show "$service" --property=NRestarts --value) || exit 1
+  expected_pid=$(systemctl show "$service" --property=MainPID --value) || exit 1
+  expected_revision=$(sed -n 's/^APP_REVISION=//p' \
+    /opt/naver-smartstore-car-plate-tracker/current/release.env)
+  expected_cron=$(sed -n 's/^SYNC_CRON=//p' \
+    /etc/naver-smartstore-car-plate-tracker/app.env)
+  [[ -n $expected_cron ]] || expected_cron='*/5 * * * *'
+  [[ $baseline_restarts =~ ^[0-9]+$ && $expected_pid =~ ^[1-9][0-9]*$ ]] || exit 1
+  [[ $expected_revision =~ ^[0-9a-f]{40}$ ]] || exit 1
+  for _ in $(seq 0 15); do
+    systemctl is-active --quiet "$service" || exit 1
+    [[ $(systemctl show "$service" --property=SubState --value) == running ]] || exit 1
+    [[ $(systemctl show "$service" --property=InvocationID --value) == "$after" ]] || exit 1
+    [[ $(systemctl show "$service" --property=NRestarts --value) == "$baseline_restarts" ]] || exit 1
+    [[ $(systemctl show "$service" --property=MainPID --value) == "$expected_pid" ]] || exit 1
+    sleep 1
+  done
+  journalctl --no-pager --output=cat "_SYSTEMD_INVOCATION_ID=$after" | python3 -c '
+import json
+import sys
+
+revision, cron = sys.argv[1:]
+found = False
+for line in sys.stdin:
+    try:
+        record = json.loads(line)
+    except (json.JSONDecodeError, TypeError):
+        continue
+    if (
+        isinstance(record, dict)
+        and record.get("msg") == "scheduler started"
+        and record.get("mode") == "live"
+        and record.get("cron") == cron
+        and record.get("appRevision") == revision
+    ):
+        found = True
+raise SystemExit(0 if found else 1)
+' "$expected_revision" "$expected_cron" || exit 1
+  exit "$status"
+}
+trap restart_scheduler EXIT
+systemctl stop "$service"
+systemd-run --wait --collect --service-type=exec \
   --uid=carplate \
   --gid=carplate \
   --working-directory=/opt/naver-smartstore-car-plate-tracker/current \
   --property=EnvironmentFile=/etc/naver-smartstore-car-plate-tracker/app.env \
   --property=EnvironmentFile=-/opt/naver-smartstore-car-plate-tracker/current/release.env \
   /usr/bin/node /opt/naver-smartstore-car-plate-tracker/current/dist/src/cli/sync-once.js
-sudo systemctl start car-plate-tracker.service
-sudo systemctl is-active car-plate-tracker.service
+BASH
 ```
 
 The CLI and scheduler both acquire `/var/lib/naver-smartstore-car-plate-tracker/runtime/sync.lock`. A lock failure is a safety stop, not permission to delete the lock directory manually.
@@ -554,11 +702,11 @@ For key rotation, first generate a second dedicated key and transfer only its pu
 export ROTATED_DEPLOY_KEY="$HOME/.ssh/carplate-github-deploy-rotated"
 umask 077
 test ! -e "$ROTATED_DEPLOY_KEY"
-ssh-keygen -t ed25519 -a 100 -f "$ROTATED_DEPLOY_KEY" -C "github-actions-carplate-production-rotated"
+ssh-keygen -t ed25519 -a 100 -N '' -f "$ROTATED_DEPLOY_KEY" -C "github-actions-carplate-production-rotated"
 scp "$ROTATED_DEPLOY_KEY.pub" "${OCI_MAINTENANCE_USER}@${OCI_DEPLOY_HOST}:/tmp/carplate-deploy-rotated.pub"
 ```
 
-Stage protected copies of the current runtime configuration, then rerun reviewed bootstrap with the new public key. Freeze merges during this short window because only one deployment key is accepted.
+Stage protected copies of the current runtime configuration. Then fetch the exact reviewed current `main` SHA into a fresh root-only repository and export an immutable copy of `ops/deployment`. Never rerun root bootstrap from the old writable checkout or from a previously reviewed source. Freeze merges during this short window because only one deployment key is accepted.
 
 **[Oracle]**
 
@@ -569,17 +717,39 @@ sudo install -m 0600 -o root -g root /etc/naver-smartstore-car-plate-tracker/app
 sudo install -m 0600 -o root -g root /etc/naver-smartstore-car-plate-tracker/google-service-account.json /root/carplate-bootstrap-rotation/google-service-account.json
 sudo install -m 0600 -o root -g root /tmp/carplate-deploy-rotated.pub /root/carplate-bootstrap-rotation/deploy.pub
 rm -f /tmp/carplate-deploy-rotated.pub
-cd "$CURRENT_CHECKOUT"
+export MAINTENANCE_SHA="replace-with-reviewed-current-main-sha"
+printf '%s\n' "$MAINTENANCE_SHA" | grep -Ex '[0-9a-f]{40}'
+export ROTATION_REPOSITORY="/root/carplate-reviewed-${MAINTENANCE_SHA}.git"
+export ROTATION_REVIEWED_SOURCE="/root/carplate-reviewed-${MAINTENANCE_SHA}"
+sudo test ! -e "$ROTATION_REPOSITORY"
+sudo test ! -e "$ROTATION_REVIEWED_SOURCE"
+sudo git init --bare --quiet "$ROTATION_REPOSITORY"
+sudo git --git-dir="$ROTATION_REPOSITORY" remote add origin \
+  https://github.com/jaem1n207/naver-smartstore-car-plate-tracker.git
+sudo git --git-dir="$ROTATION_REPOSITORY" fetch --depth=1 origin \
+  refs/heads/main:refs/heads/reviewed
+test "$(sudo git --git-dir="$ROTATION_REPOSITORY" rev-parse refs/heads/reviewed)" = "$MAINTENANCE_SHA"
+sudo install -d -m 0555 -o root -g root "$ROTATION_REVIEWED_SOURCE"
+sudo git --git-dir="$ROTATION_REPOSITORY" archive "$MAINTENANCE_SHA" ops/deployment |
+  sudo tar --extract --directory="$ROTATION_REVIEWED_SOURCE" --no-same-owner
+sudo chown -R root:root "$ROTATION_REVIEWED_SOURCE"
+sudo find "$ROTATION_REVIEWED_SOURCE" -type d -exec chmod 0555 -- {} +
+sudo find "$ROTATION_REVIEWED_SOURCE" -type f -exec chmod 0444 -- {} +
+test -z "$(sudo find "$ROTATION_REVIEWED_SOURCE" \( ! -user root -o -perm /022 -o -type l \) -print -quit)"
+before_invocation=$(sudo systemctl show car-plate-tracker.service --property=InvocationID --value)
+cd /
 sudo env \
   CARPLATE_ENV_SOURCE=/root/carplate-bootstrap-rotation/app.env \
   CARPLATE_GOOGLE_JSON_SOURCE=/root/carplate-bootstrap-rotation/google-service-account.json \
   CARPLATE_AUTHORIZED_KEY_SOURCE=/root/carplate-bootstrap-rotation/deploy.pub \
   CARPLATE_INITIAL_RELEASE_SOURCE="$CURRENT_CHECKOUT" \
-  CARPLATE_REVIEWED_SCRIPT_DIR="$CURRENT_CHECKOUT/ops/deployment" \
-  /usr/bin/bash "$CURRENT_CHECKOUT/ops/deployment/bootstrap.sh"
+  CARPLATE_REVIEWED_SCRIPT_DIR="$ROTATION_REVIEWED_SOURCE/ops/deployment" \
+  /usr/bin/bash "$ROTATION_REVIEWED_SOURCE/ops/deployment/bootstrap.sh"
 sudo sshd -t
 sudo visudo -cf /etc/sudoers.d/carplate-deploy
 sudo systemctl is-active car-plate-tracker.service
+after_invocation=$(sudo systemctl show car-plate-tracker.service --property=InvocationID --value)
+test "$after_invocation" != "$before_invocation"
 ```
 
 **[GitHub UI]** Replace only `OCI_DEPLOY_SSH_PRIVATE_KEY` with the complete rotated private key, then run `workflow_dispatch` on `main`.
@@ -600,6 +770,8 @@ rm -f "$DEPLOY_KEY" "$DEPLOY_KEY.pub"
 sudo find /root/carplate-bootstrap-rotation -type f -exec shred -u -- {} +
 sudo rmdir /root/carplate-bootstrap-rotation
 ```
+
+The root-owned reviewed repository and source contain no credentials. Keep them as the maintenance audit record; remove them only under a separate reviewed retention policy.
 
 Rotate `OCI_DEPLOY_KNOWN_HOSTS` only after a host-key change is independently verified through the Oracle console or another trusted path. Naver and Google credential rotation updates `/etc` through the same explicit maintenance process, followed by the fixed-IP live smoke test.
 
