@@ -21,6 +21,7 @@ fi
 export PATH
 
 readonly DEPLOYMENT_DIRECTORY=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+readonly REPOSITORY_ROOT=$(cd -- "${DEPLOYMENT_DIRECTORY}/../.." && pwd -P)
 readonly APP_ROOT=${CARPLATE_APP_ROOT:-/opt/naver-smartstore-car-plate-tracker}
 readonly STATE_ROOT=${CARPLATE_STATE_ROOT:-/var/lib/naver-smartstore-car-plate-tracker}
 readonly ETC_DIRECTORY=${CARPLATE_ETC_DIR:-/etc/naver-smartstore-car-plate-tracker}
@@ -35,6 +36,7 @@ readonly ENVIRONMENT_SOURCE=${CARPLATE_ENV_SOURCE:-"${DEPLOYMENT_DIRECTORY}/../.
 readonly GOOGLE_JSON_SOURCE=${CARPLATE_GOOGLE_JSON_SOURCE:-"${DEPLOYMENT_DIRECTORY}/../../google-service-account.json"}
 readonly AUTHORIZED_KEY_SOURCE=${CARPLATE_AUTHORIZED_KEY_SOURCE:-}
 readonly REVIEWED_SCRIPT_DIRECTORY=${CARPLATE_REVIEWED_SCRIPT_DIR:-"${DEPLOYMENT_DIRECTORY}"}
+readonly INITIAL_RELEASE_SOURCE=${CARPLATE_INITIAL_RELEASE_SOURCE:-"${REPOSITORY_ROOT}"}
 readonly RUNTIME_DIRECTORY="${STATE_ROOT}/runtime"
 readonly DEPLOYMENT_STATE_DIRECTORY="${STATE_ROOT}/deployment"
 readonly REPOSITORY_DIRECTORY="${APP_ROOT}/repository.git"
@@ -215,6 +217,7 @@ install_ssh_restrictions() {
     X11Forwarding no
     PermitUserRC no
     GatewayPorts no
+Match all
 "
   sshd -t -f "$SSHD_CONFIG"
   effective_policy=$(sshd -T -C "user=${CARPLATE_DEPLOY_USER},host=localhost,addr=127.0.0.1" -f "$SSHD_CONFIG")
@@ -251,11 +254,6 @@ install_systemd_units() {
   systemctl daemon-reload
 }
 
-has_known_good_marker() {
-  local marker="${DEPLOYMENT_STATE_DIRECTORY}/deployed-sha"
-  [[ -f $marker && ! -L $marker ]] && grep -qxE '[0-9a-f]{40}' "$marker"
-}
-
 install_application_layout() {
   install -d -m 0755 -o root -g root "$APP_ROOT"
   install -d -m 0710 -o root -g "$CARPLATE_BUILD_USER" "$CANDIDATES_DIRECTORY"
@@ -273,6 +271,244 @@ install_application_layout() {
   else
     git --git-dir="$REPOSITORY_DIRECTORY" remote add origin "$PINNED_ORIGIN"
   fi
+}
+
+validate_initial_source() {
+  local git_root
+
+  require_absolute_path "$INITIAL_RELEASE_SOURCE" || die 'CARPLATE_INITIAL_RELEASE_SOURCE must be an absolute normalized path'
+  [[ -d $INITIAL_RELEASE_SOURCE && ! -L $INITIAL_RELEASE_SOURCE ]] ||
+    die 'initial release source must be a real directory'
+  require_regular_source "${INITIAL_RELEASE_SOURCE}/package.json" ||
+    die 'initial release source must contain a regular package.json'
+  [[ -d ${INITIAL_RELEASE_SOURCE}/dist && ! -L ${INITIAL_RELEASE_SOURCE}/dist ]] ||
+    die 'initial release source must contain a real dist directory'
+  require_regular_source "${INITIAL_RELEASE_SOURCE}/dist/src/scheduler/main.js" ||
+    die 'initial release source must contain the built scheduler entrypoint'
+  [[ -d ${INITIAL_RELEASE_SOURCE}/node_modules && ! -L ${INITIAL_RELEASE_SOURCE}/node_modules ]] ||
+    die 'initial release source must contain real node_modules'
+  if [[ -e ${INITIAL_RELEASE_SOURCE}/pnpm-lock.yaml || -L ${INITIAL_RELEASE_SOURCE}/pnpm-lock.yaml ]]; then
+    require_regular_source "${INITIAL_RELEASE_SOURCE}/pnpm-lock.yaml" ||
+      die 'initial release lockfile must be a regular file'
+  fi
+
+  git_root=$(git -C "$INITIAL_RELEASE_SOURCE" rev-parse --show-toplevel 2>/dev/null) ||
+    die 'initial release source must be a Git checkout'
+  git_root=$(cd -- "$git_root" && pwd -P) || die 'cannot resolve initial release Git root'
+  [[ $git_root == "$INITIAL_RELEASE_SOURCE" ]] ||
+    die 'initial release source must be the Git checkout root'
+}
+
+initial_source_sha() {
+  local sha
+  sha=$(git -C "$INITIAL_RELEASE_SOURCE" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) ||
+    return 1
+  [[ $sha =~ ^[0-9a-f]{40}$ ]] || return 1
+  printf '%s\n' "$sha"
+}
+
+validate_with_reviewed_common() {
+  local candidate=$1
+  (
+    source "${SCRIPT_DIRECTORY}/lib/common.sh"
+    validate_candidate_tree "$candidate"
+  )
+}
+
+validate_sealed_release_at() {
+  local sha=$1
+  local release=$2
+  local revision
+  local unexpected_owner
+
+  [[ $sha =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ -d $release && ! -L $release ]] || return 1
+  require_regular_source "$release/package.json" || return 1
+  require_regular_source "$release/dist/src/scheduler/main.js" || return 1
+  [[ -d $release/node_modules && ! -L $release/node_modules ]] || return 1
+  require_regular_source "$release/release.env" || return 1
+  IFS= read -r revision <"$release/release.env" || return 1
+  [[ $revision == "APP_REVISION=$sha" ]] || return 1
+  [[ $(wc -c <"$release/release.env") -eq $((${#revision} + 1)) ]] || return 1
+  validate_with_reviewed_common "$release" || return 1
+  python3 -c '
+import os
+import stat
+import sys
+
+root = sys.argv[1]
+for current, directories, files in os.walk(root, followlinks=False):
+    for path in [current, *(os.path.join(current, name) for name in directories + files)]:
+        metadata = os.lstat(path)
+        if stat.S_ISLNK(metadata.st_mode):
+            continue
+        expected = 0o550 if stat.S_ISDIR(metadata.st_mode) else 0o440
+        if stat.S_IMODE(metadata.st_mode) != expected:
+            raise SystemExit(1)
+' "$release" || return 1
+  if [[ ${CARPLATE_TEST_MODE:-} != 1 ]]; then
+    unexpected_owner=$(find "$release" -xdev \( ! -user root -o ! -group "$CARPLATE_RUNTIME_USER" \) -print -quit) ||
+      return 1
+    [[ -z $unexpected_owner ]] || return 1
+  fi
+}
+
+validate_sealed_release() {
+  local sha=$1
+  validate_sealed_release_at "$sha" "${RELEASES_DIRECTORY}/${sha}"
+}
+
+read_deployed_sha() {
+  local marker="${DEPLOYMENT_STATE_DIRECTORY}/deployed-sha"
+  local sha
+
+  [[ -f $marker && ! -L $marker ]] || return 1
+  IFS= read -r sha <"$marker" || return 1
+  [[ $sha =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ $(wc -c <"$marker") -eq 41 ]] || return 1
+  python3 -c '
+import os
+import stat
+import sys
+
+metadata = os.lstat(sys.argv[1])
+if stat.S_IMODE(metadata.st_mode) != 0o600:
+    raise SystemExit(1)
+if sys.argv[2] != "1" and (metadata.st_uid != 0 or metadata.st_gid != 0):
+    raise SystemExit(1)
+' "$marker" "${CARPLATE_TEST_MODE:-0}" || return 1
+  printf '%s\n' "$sha"
+}
+
+read_current_sha() {
+  local target
+  [[ -L ${APP_ROOT}/current ]] || return 1
+  target=$(readlink "${APP_ROOT}/current") || return 1
+  [[ $target =~ ^releases/([0-9a-f]{40})$ ]] || return 1
+  printf '%s\n' "${BASH_REMATCH[1]}"
+}
+
+remove_initial_temporary_release() {
+  local sha=$1
+  local temporary_release="${RELEASES_DIRECTORY}/.${sha}.bootstrap.tmp"
+
+  [[ $sha =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ $temporary_release == "$RELEASES_DIRECTORY"/* && ${temporary_release#"$RELEASES_DIRECTORY"/} != */* ]] ||
+    return 1
+  if [[ ! -e $temporary_release && ! -L $temporary_release ]]; then
+    return 0
+  fi
+  [[ -d $temporary_release && ! -L $temporary_release ]] || return 1
+  find "$temporary_release" -type d -exec chmod u+rwx {} + || return 1
+  rm -rf -- "$temporary_release" || return 1
+  [[ ! -e $temporary_release && ! -L $temporary_release ]]
+}
+
+fsync_directory() {
+  python3 -c 'import os,sys; descriptor=os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY); os.fsync(descriptor); os.close(descriptor)' "$1"
+}
+
+populate_initial_temporary_release() {
+  local sha=$1
+  local temporary_release=$2
+
+  mkdir -m 0700 "$temporary_release" || return 1
+  COPYFILE_DISABLE=1 cp -R "${INITIAL_RELEASE_SOURCE}/dist" "$temporary_release/dist" || return 1
+  COPYFILE_DISABLE=1 cp -R "${INITIAL_RELEASE_SOURCE}/node_modules" "$temporary_release/node_modules" ||
+    return 1
+  COPYFILE_DISABLE=1 cp "${INITIAL_RELEASE_SOURCE}/package.json" "$temporary_release/package.json" ||
+    return 1
+  if [[ -f ${INITIAL_RELEASE_SOURCE}/pnpm-lock.yaml && ! -L ${INITIAL_RELEASE_SOURCE}/pnpm-lock.yaml ]]; then
+    COPYFILE_DISABLE=1 cp "${INITIAL_RELEASE_SOURCE}/pnpm-lock.yaml" "$temporary_release/pnpm-lock.yaml" ||
+      return 1
+  fi
+  validate_with_reviewed_common "$temporary_release" || return 1
+  (
+    umask 077
+    set -o noclobber
+    printf 'APP_REVISION=%s\n' "$sha" >"$temporary_release/release.env"
+  ) || return 1
+  find "$temporary_release" -type d -exec chmod 0550 {} + || return 1
+  find "$temporary_release" -type f -exec chmod 0440 {} + || return 1
+  chown -hR "root:${CARPLATE_RUNTIME_USER}" "$temporary_release" || return 1
+  validate_sealed_release_at "$sha" "$temporary_release"
+}
+
+create_or_validate_initial_release() {
+  local sha=$1
+  local release="${RELEASES_DIRECTORY}/${sha}"
+  local temporary_release="${RELEASES_DIRECTORY}/.${sha}.bootstrap.tmp"
+
+  remove_initial_temporary_release "$sha" || return 1
+  if [[ -e $release || -L $release ]]; then
+    validate_sealed_release "$sha"
+    return
+  fi
+  if ! populate_initial_temporary_release "$sha" "$temporary_release"; then
+    remove_initial_temporary_release "$sha" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv "$temporary_release" "$release" || return 1
+  fsync_directory "$RELEASES_DIRECTORY" || return 1
+  validate_sealed_release "$sha"
+}
+
+replace_current_atomically() {
+  local sha=$1
+  python3 "${SCRIPT_DIRECTORY}/atomic_fs.py" --allowed-root "$APP_ROOT" \
+    replace-symlink "${APP_ROOT}/current" "releases/${sha}"
+}
+
+write_deployed_sha_atomically() {
+  local sha=$1
+  printf '%s\n' "$sha" | python3 "${SCRIPT_DIRECTORY}/atomic_fs.py" \
+    --allowed-root "$STATE_ROOT" write-file "${DEPLOYMENT_STATE_DIRECTORY}/deployed-sha" 0600
+}
+
+verify_known_good_baseline() {
+  local sha=$1
+  local current_sha
+
+  validate_sealed_release "$sha" || return 1
+  current_sha=$(read_current_sha) || return 1
+  [[ $current_sha == "$sha" ]] || return 1
+  [[ $(read_deployed_sha) == "$sha" ]]
+}
+
+establish_initial_known_good_release() {
+  local marker="${DEPLOYMENT_STATE_DIRECTORY}/deployed-sha"
+  local sha
+  local current_sha
+
+  if [[ -e $marker || -L $marker ]]; then
+    sha=$(read_deployed_sha) || die 'existing deployed-sha marker is invalid'
+    remove_initial_temporary_release "$sha" || die 'cannot clean partial initial release'
+    validate_sealed_release "$sha" || die 'existing deployed release is invalid'
+    if [[ -e ${APP_ROOT}/current || -L ${APP_ROOT}/current ]]; then
+      current_sha=$(read_current_sha) || die 'existing current link is invalid'
+      [[ $current_sha == "$sha" ]] || die 'existing current link disagrees with deployed-sha'
+    else
+      replace_current_atomically "$sha" || die 'cannot establish current release link'
+    fi
+    verify_known_good_baseline "$sha" || die 'known-good deployment baseline verification failed'
+    return
+  fi
+
+  if [[ -e ${APP_ROOT}/current || -L ${APP_ROOT}/current ]]; then
+    sha=$(read_current_sha) || die 'existing current link is invalid'
+    remove_initial_temporary_release "$sha" || die 'cannot clean partial initial release'
+    validate_sealed_release "$sha" || die 'existing current release is invalid'
+    write_deployed_sha_atomically "$sha" || die 'cannot establish deployed-sha marker'
+    verify_known_good_baseline "$sha" || die 'known-good deployment baseline verification failed'
+    return
+  fi
+
+  validate_initial_source
+  sha=$(initial_source_sha) || die 'initial release Git HEAD must be a 40-character lowercase SHA'
+  create_or_validate_initial_release "$sha" || die 'cannot seal initial release'
+  replace_current_atomically "$sha" || die 'cannot establish current release link'
+  write_deployed_sha_atomically "$sha" || die 'cannot establish deployed-sha marker'
+  verify_known_good_baseline "$sha" || die 'known-good deployment baseline verification failed'
 }
 
 main() {
@@ -307,10 +543,9 @@ main() {
   install_ssh_restrictions
   install_sudoers_policy
   install_systemd_units
+  establish_initial_known_good_release
 
-  if has_known_good_marker; then
-    systemctl enable --now car-plate-tracker.service
-  fi
+  systemctl enable --now car-plate-tracker.service
 }
 
 main "$@"

@@ -1,5 +1,17 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,21 +20,21 @@ const repositoryRoot = resolve(import.meta.dirname, "../..");
 const bootstrapScript = join(repositoryRoot, "ops/deployment/bootstrap.sh");
 const systemdDirectory = join(repositoryRoot, "ops/deployment/systemd");
 const temporaryDirectories: string[] = [];
-const knownGoodRevision = "abcdef0123456789abcdef0123456789abcdef01";
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories
-      .splice(0)
-      .map((directory) => rm(directory, { force: true, recursive: true })),
+    temporaryDirectories.splice(0).map(async (directory) => {
+      await runProcess("chmod", ["-R", "u+w", directory], process.env);
+      await rm(directory, { force: true, recursive: true });
+    }),
   );
 });
 
 describe("deployment isolation contract", () => {
   it("installs only separated accounts, root-controlled state, and constrained SSH access", async () => {
     const fixture = await createBootstrapFixture();
-    const candidate = join(fixture.appRoot, "candidates", knownGoodRevision);
-    const packageStore = join(fixture.appRoot, "package-store", knownGoodRevision);
+    const candidate = join(fixture.appRoot, "candidates", fixture.initialRevision);
+    const packageStore = join(fixture.appRoot, "package-store", fixture.initialRevision);
     await Promise.all([
       mkdir(candidate, { recursive: true, mode: 0o700 }),
       mkdir(packageStore, { recursive: true, mode: 0o700 }),
@@ -65,6 +77,7 @@ describe("deployment isolation contract", () => {
     expect(sshdPolicy).toContain("AllowTcpForwarding no");
     expect(sshdPolicy).toContain("X11Forwarding no");
     expect(sshdPolicy).toContain("PermitUserRC no");
+    expect(sshdPolicy).toMatch(/ {4}GatewayPorts no\nMatch all\n$/);
     await expect(readFile(fixture.sudoersFile, "utf8")).resolves.toContain(
       `${join(fixture.privilegedExecutableDirectory, "deploy-car-plate-tracker")} ^[0-9a-f]{40}$`,
     );
@@ -109,7 +122,7 @@ describe("deployment isolation contract", () => {
     );
     expect(commands).toContain("systemctl reload ssh.service");
     expect(commands).toContain("systemctl daemon-reload");
-    expect(commands.some((command) => command.startsWith("systemctl enable"))).toBe(false);
+    expect(commands).toContain("systemctl enable --now car-plate-tracker.service");
     expect(
       commands.some((command) => command.includes(" /etc/") || command.includes(" /var/lib/")),
     ).toBe(false);
@@ -174,19 +187,95 @@ describe("deployment isolation contract", () => {
     expect(second.stderr).toContain("deployment account UIDs must be distinct nonzero values");
   }, 15_000);
 
-  it("enables the scheduler only after an exact known-good deployment marker exists", async () => {
-    const fixture = await createBootstrapFixture();
-    await mkdir(join(fixture.stateRoot, "deployment"), { recursive: true });
-    await writeFile(
-      join(fixture.stateRoot, "deployment", "deployed-sha"),
-      `${knownGoodRevision}\n`,
+  it("seals a secretless initial release before enabling the scheduler and preserves it on repeat", async () => {
+    const fixture = await createBootstrapFixture({ initialSourceInAppRoot: true });
+    const temporaryRelease = join(
+      fixture.appRoot,
+      "releases",
+      `.${fixture.initialRevision}.bootstrap.tmp`,
     );
+    await mkdir(temporaryRelease, { recursive: true });
+    await writeFile(join(temporaryRelease, "partial"), "remove me\n");
 
-    const result = await runBootstrap(fixture);
-    expect(result.code, result.stderr).toBe(0);
+    const first = await runBootstrap(fixture);
+    expect(first.code, first.stderr).toBe(0);
+
+    const release = join(fixture.appRoot, "releases", fixture.initialRevision);
+    const marker = join(fixture.stateRoot, "deployment", "deployed-sha");
+    const current = join(fixture.appRoot, "current");
+    await expect(readFile(marker, "ascii")).resolves.toBe(`${fixture.initialRevision}\n`);
+    await expect(readlink(current)).resolves.toBe(`releases/${fixture.initialRevision}`);
+    await expect(readFile(join(release, "release.env"), "ascii")).resolves.toBe(
+      `APP_REVISION=${fixture.initialRevision}\n`,
+    );
+    await expect(readFile(join(release, "package.json"), "utf8")).resolves.toContain(
+      '"name": "initial-release-fixture"',
+    );
+    await expect(readFile(join(release, "dist/src/scheduler/main.js"), "utf8")).resolves.toBe(
+      'console.log("scheduler");\n',
+    );
+    await expect(readFile(join(release, "node_modules/runtime.txt"), "utf8")).resolves.toBe(
+      "runtime dependency\n",
+    );
+    await expect(readFile(join(release, "pnpm-lock.yaml"), "utf8")).resolves.toBe(
+      "lockfileVersion: '9.0'\n",
+    );
+    expect((await readdir(release)).sort()).toEqual([
+      "dist",
+      "node_modules",
+      "package.json",
+      "pnpm-lock.yaml",
+      "release.env",
+    ]);
+    expect(await pathExists(join(release, ".env"))).toBe(false);
+    expect(await pathExists(join(release, ".git"))).toBe(false);
+    expect(await pathExists(join(release, "google-service-account.json"))).toBe(false);
+    expect(await pathExists(join(release, "google-credentials.json"))).toBe(false);
+    expect(await pathExists(join(release, "releases"))).toBe(false);
+    expect(await pathExists(join(release, "repository.git"))).toBe(false);
+    expect(await pathExists(temporaryRelease)).toBe(false);
+    expect((await stat(release)).mode & 0o777).toBe(0o550);
+    expect((await stat(join(release, "dist"))).mode & 0o777).toBe(0o550);
+    expect((await stat(join(release, "package.json"))).mode & 0o777).toBe(0o440);
+    expect((await stat(marker)).mode & 0o777).toBe(0o600);
+
+    const releaseInode = (await stat(release)).ino;
+    const markerInode = (await stat(marker)).ino;
+    const currentInode = (await lstat(current)).ino;
+    const second = await runBootstrap(fixture);
+    expect(second.code, second.stderr).toBe(0);
+    expect((await stat(release)).ino).toBe(releaseInode);
+    expect((await stat(marker)).ino).toBe(markerInode);
+    expect((await lstat(current)).ino).toBe(currentInode);
 
     const commands = await readCommands(fixture.commandLog);
-    expect(commands).toContain("systemctl enable --now car-plate-tracker.service");
+    expect(
+      commands.filter((command) => command === "systemctl enable --now car-plate-tracker.service"),
+    ).toHaveLength(2);
+    expect(
+      commands.some(
+        (command) =>
+          command ===
+          `chown -hR root:carplate ${join(fixture.appRoot, "releases", `.${fixture.initialRevision}.bootstrap.tmp`)}`,
+      ),
+    ).toBe(true);
+  }, 15_000);
+
+  it("fails closed without replacing a malformed existing deployment marker", async () => {
+    const fixture = await createBootstrapFixture();
+    const marker = join(fixture.stateRoot, "deployment", "deployed-sha");
+    const malformedMarker = `${fixture.initialRevision}\ntrailing-data`;
+    await mkdir(join(fixture.stateRoot, "deployment"), { recursive: true });
+    await writeFile(marker, malformedMarker, { mode: 0o600 });
+
+    const result = await runBootstrap(fixture);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("existing deployed-sha marker is invalid");
+    await expect(readFile(marker, "ascii")).resolves.toBe(malformedMarker);
+    expect(await pathExists(join(fixture.appRoot, "current"))).toBe(false);
+
+    const commands = await readCommands(fixture.commandLog);
+    expect(commands).not.toContain("systemctl enable --now car-plate-tracker.service");
   }, 15_000);
 
   it("keeps the runtime service confined while permitting Node JIT", async () => {
@@ -251,12 +340,20 @@ interface BootstrapFixture {
   readonly sudoersFile: string;
   readonly temporaryDirectory: string;
   readonly environmentSource: string;
+  readonly initialReleaseSource: string;
+  readonly initialRevision: string;
   readonly reviewedScriptDirectory: string;
   readonly shimDirectory: string;
   readonly sshDirectory: string;
 }
 
-async function createBootstrapFixture(): Promise<BootstrapFixture> {
+interface BootstrapFixtureOptions {
+  readonly initialSourceInAppRoot?: boolean;
+}
+
+async function createBootstrapFixture(
+  options: BootstrapFixtureOptions = {},
+): Promise<BootstrapFixture> {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "carplate-bootstrap-"));
   temporaryDirectories.push(temporaryDirectory);
   const stateRoot = join(temporaryDirectory, "state");
@@ -270,6 +367,9 @@ async function createBootstrapFixture(): Promise<BootstrapFixture> {
   const shimDirectory = join(temporaryDirectory, "shims");
   const commandLog = join(temporaryDirectory, "commands.log");
   const accountStateDirectory = join(temporaryDirectory, "accounts");
+  const initialReleaseSource = options.initialSourceInAppRoot
+    ? appRoot
+    : join(temporaryDirectory, "initial-source");
   const environmentSource = join(temporaryDirectory, "current.env");
   const googleSource = join(temporaryDirectory, "current-google.json");
   const authorizedKeys = join(sshDirectory, "carplate-deploy");
@@ -295,6 +395,7 @@ async function createBootstrapFixture(): Promise<BootstrapFixture> {
   ]);
   await chmod(environmentSource, 0o600);
   await chmod(googleSource, 0o600);
+  const initialRevision = await writeInitialReleaseSource(initialReleaseSource);
   await writeReviewedScripts(reviewedScriptDirectory);
   await writeCommandShims(shimDirectory, commandLog, accountStateDirectory);
 
@@ -307,6 +408,8 @@ async function createBootstrapFixture(): Promise<BootstrapFixture> {
     etcDirectory,
     googleDestination: join(etcDirectory, "google-service-account.json"),
     googleSource,
+    initialReleaseSource,
+    initialRevision,
     reviewedScriptDirectory,
     scriptDirectory,
     privilegedExecutableDirectory,
@@ -327,9 +430,47 @@ async function writeReviewedScripts(directory: string): Promise<void> {
     writeFile(join(directory, "deploy.sh"), shellScript, { mode: 0o700 }),
     writeFile(join(directory, "recover.sh"), shellScript, { mode: 0o700 }),
     writeFile(join(directory, "build-candidate.sh"), shellScript, { mode: 0o700 }),
-    writeFile(join(directory, "lib", "common.sh"), shellScript, { mode: 0o700 }),
-    writeFile(join(directory, "atomic_fs.py"), "print('ok')\n", { mode: 0o600 }),
+    copyFile(
+      join(repositoryRoot, "ops/deployment/lib/common.sh"),
+      join(directory, "lib", "common.sh"),
+    ),
+    copyFile(join(repositoryRoot, "ops/deployment/atomic_fs.py"), join(directory, "atomic_fs.py")),
   ]);
+}
+
+async function writeInitialReleaseSource(directory: string): Promise<string> {
+  await Promise.all([
+    mkdir(join(directory, "dist/src/scheduler"), { recursive: true }),
+    mkdir(join(directory, "node_modules"), { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(
+      join(directory, "package.json"),
+      '{\n  "name": "initial-release-fixture",\n  "private": true\n}\n',
+    ),
+    writeFile(join(directory, "dist/src/scheduler/main.js"), 'console.log("scheduler");\n'),
+    writeFile(join(directory, "node_modules/runtime.txt"), "runtime dependency\n"),
+    writeFile(join(directory, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n"),
+    writeFile(join(directory, ".env"), "SECRET=do-not-copy\n"),
+    writeFile(join(directory, "google-service-account.json"), '{"private_key":"do-not-copy"}\n'),
+    writeFile(join(directory, "google-credentials.json"), '{"token":"do-not-copy"}\n'),
+  ]);
+
+  for (const arguments_ of [
+    ["init", "--quiet"],
+    ["config", "user.name", "Bootstrap Test"],
+    ["config", "user.email", "bootstrap@example.test"],
+    ["add", "package.json", "dist/src/scheduler/main.js", "pnpm-lock.yaml"],
+    ["commit", "--quiet", "-m", "initial built checkout"],
+  ]) {
+    const result = await runProcess("git", ["-C", directory, ...arguments_], process.env);
+    expect(result.code, result.stderr).toBe(0);
+  }
+  const revision = await runProcess("git", ["-C", directory, "rev-parse", "HEAD"], process.env);
+  expect(revision.code, revision.stderr).toBe(0);
+  const sha = revision.stdout.trim();
+  expect(sha).toMatch(/^[0-9a-f]{40}$/);
+  return sha;
 }
 
 async function writeCommandShims(
@@ -426,7 +567,7 @@ case "$(basename "$0")" in
       printf '%s' "$supplementary" > "$account_state/groups-$user"
     fi
     ;;
-  passwd|systemctl|visudo)
+  passwd|systemctl|visudo|chown)
     ;;
   sshd)
     config="${shellDollar}{!#}"
@@ -467,6 +608,7 @@ esac
       "visudo",
       "sshd",
       "install",
+      "chown",
     ].map(async (command) => {
       const path = join(directory, command);
       await writeFile(path, shim, { mode: 0o700 });
@@ -483,6 +625,7 @@ async function runBootstrap(fixture: BootstrapFixture): Promise<ProcessResult> {
     CARPLATE_ENV_SOURCE: fixture.environmentSource,
     CARPLATE_ETC_DIR: fixture.etcDirectory,
     CARPLATE_GOOGLE_JSON_SOURCE: fixture.googleSource,
+    CARPLATE_INITIAL_RELEASE_SOURCE: fixture.initialReleaseSource,
     CARPLATE_SCRIPT_DIR: fixture.scriptDirectory,
     CARPLATE_PRIVILEGED_EXECUTABLE_DIR: fixture.privilegedExecutableDirectory,
     CARPLATE_SSHD_DROPIN: fixture.sshdDropIn,
@@ -495,6 +638,22 @@ async function runBootstrap(fixture: BootstrapFixture): Promise<ProcessResult> {
     CARPLATE_REVIEWED_SCRIPT_DIR: fixture.reviewedScriptDirectory,
   };
   return await runProcess("bash", [bootstrapScript], environment);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 async function readCommands(commandLog: string): Promise<string[]> {
