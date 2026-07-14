@@ -8,6 +8,7 @@ import {
   stat,
   symlink,
   unlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -195,6 +196,35 @@ describe("lock owner compatibility", () => {
     await writeFile(join(guardedLock, "unexpected"), "keep");
     await expectShellFailure("acquire_sync_lock", guardedLock, "0");
     await expect(readFile(join(guardedLock, "unexpected"), "utf8")).resolves.toBe("keep");
+  });
+
+  it("reclaims only empty orphan lock directories older than the publication grace period", async () => {
+    const oldEmptyLock = await createTemporaryPath("carplate-shell-lock-");
+    await mkdir(oldEmptyLock);
+    await agePath(oldEmptyLock);
+
+    const acquired = await runShellBody(
+      'token=$(acquire_sync_lock "$2" 0); cat "$2/owner"; release_sync_lock "$2" "$token"',
+      [oldEmptyLock],
+    );
+    expect(acquired.code, acquired.stderr).toBe(0);
+    expect(acquired.stdout).toMatch(
+      /^pid=[1-9][0-9]*\nstart_ticks=([1-9][0-9]*|unknown)\ntoken=[0-9a-f]{32}\n$/u,
+    );
+
+    const freshEmptyLock = await createTemporaryPath("carplate-shell-lock-");
+    await mkdir(freshEmptyLock);
+    await expectShellFailure("acquire_sync_lock", freshEmptyLock, "0");
+    await expect(stat(freshEmptyLock)).resolves.toBeDefined();
+
+    const oldGuardedLock = await createTemporaryPath("carplate-shell-lock-");
+    await mkdir(oldGuardedLock);
+    await writeFile(join(oldGuardedLock, ".owner.partial.tmp"), "keep");
+    await agePath(oldGuardedLock);
+    await expectShellFailure("acquire_sync_lock", oldGuardedLock, "0");
+    await expect(readFile(join(oldGuardedLock, ".owner.partial.tmp"), "utf8")).resolves.toBe(
+      "keep",
+    );
   });
 });
 
@@ -553,6 +583,11 @@ async function writeOwner(lockDir: string, pid: number | string): Promise<void> 
     join(lockDir, "owner"),
     `pid=${String(pid)}\nstart_ticks=1234\ntoken=0123456789abcdef0123456789abcdef\n`,
   );
+}
+
+async function agePath(path: string): Promise<void> {
+  const oldTimestamp = new Date(Date.now() - 61_000);
+  await utimes(path, oldTimestamp, oldTimestamp);
 }
 
 async function writeJournal(contents: string): Promise<string> {

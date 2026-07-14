@@ -9,6 +9,7 @@ export PATH
 readonly SYNC_LOCK_PARENT_MODE=2770
 readonly SYNC_LOCK_DIRECTORY_MODE=0770
 readonly SYNC_LOCK_OWNER_MODE=0640
+readonly SYNC_LOCK_EMPTY_ORPHAN_MINIMUM_AGE_SECONDS=60
 
 validate_sha() {
   [[ $# -eq 1 && $1 =~ ^[0-9a-f]{40}$ ]]
@@ -445,7 +446,10 @@ _reclaim_stale_sync_lock() {
   local lock_dir=$1
   local snapshot
 
-  _load_lock_owner "$lock_dir" || return 1
+  if ! _load_lock_owner "$lock_dir"; then
+    _reclaim_empty_orphan_sync_lock "$lock_dir"
+    return
+  fi
   _lock_owner_is_stale || return 1
   _lock_contains_only_owner "$lock_dir" || return 1
   printf -v snapshot 'pid=%s\nstart_ticks=%s\ntoken=%s\n' \
@@ -456,6 +460,30 @@ _reclaim_stale_sync_lock() {
 
   rm "$lock_dir/owner" || return 1
   rmdir "$lock_dir"
+}
+
+_reclaim_empty_orphan_sync_lock() {
+  [[ $# -eq 1 ]] || return 1
+  local lock_dir=$1
+
+  python3 -c '
+import os
+import stat
+import sys
+import time
+
+metadata = os.lstat(sys.argv[1])
+minimum_age_ns = int(sys.argv[2]) * 1_000_000_000
+if not stat.S_ISDIR(metadata.st_mode):
+    raise SystemExit(1)
+if time.time_ns() - metadata.st_mtime_ns < minimum_age_ns:
+    raise SystemExit(1)
+with os.scandir(sys.argv[1]) as entries:
+    if next(entries, None) is not None:
+        raise SystemExit(1)
+' "$lock_dir" "$SYNC_LOCK_EMPTY_ORPHAN_MINIMUM_AGE_SECONDS" || return 1
+
+  rmdir "$lock_dir" 2>/dev/null || [[ ! -e $lock_dir && ! -L $lock_dir ]]
 }
 
 _lock_owner_is_stale() {

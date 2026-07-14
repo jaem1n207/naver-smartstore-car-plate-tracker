@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, rmdir, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, rename, rmdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 const ownerFileName = "owner";
+const emptyOrphanMinimumAgeMs = 60_000;
 const tokenPattern = /^[0-9a-f]{32}$/u;
 const positiveIntegerPattern = /^[1-9][0-9]*$/u;
 const ownerPattern =
@@ -122,7 +123,7 @@ async function createLease(options: NormalizedSyncLockOptions): Promise<SyncLock
 async function reclaimStaleLock(options: NormalizedSyncLockOptions): Promise<boolean> {
   const owner = await readExistingOwner(options.lockDir);
   if (owner === undefined) {
-    return false;
+    return await reclaimEmptyOrphanLock(options.lockDir);
   }
 
   if (!(await isStaleOwner(owner, options))) {
@@ -148,6 +149,42 @@ async function reclaimStaleLock(options: NormalizedSyncLockOptions): Promise<boo
   }
 
   return true;
+}
+
+async function reclaimEmptyOrphanLock(lockDir: string): Promise<boolean> {
+  let modifiedAt: number;
+  try {
+    const metadata = await lstat(lockDir);
+    if (!metadata.isDirectory()) {
+      return false;
+    }
+    modifiedAt = metadata.mtimeMs;
+  } catch (error: unknown) {
+    if (errorCode(error) === "ENOENT") {
+      return true;
+    }
+    throw error;
+  }
+
+  if (Date.now() - modifiedAt < emptyOrphanMinimumAgeMs) {
+    return false;
+  }
+
+  try {
+    if ((await readdir(lockDir)).length !== 0) {
+      return false;
+    }
+    await rmdir(lockDir);
+    return true;
+  } catch (error: unknown) {
+    if (errorCode(error) === "ENOENT") {
+      return true;
+    }
+    if (errorCode(error) === "ENOTEMPTY" || errorCode(error) === "EEXIST") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 async function isStaleOwner(

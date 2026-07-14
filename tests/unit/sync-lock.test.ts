@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -87,6 +87,57 @@ describe("acquireSyncLock", () => {
     await lease.release();
   });
 
+  it("reclaims an empty orphan lock directory after the publication grace period", async () => {
+    const lockDir = await createLockPath();
+    await mkdir(lockDir);
+    await agePath(lockDir);
+
+    const lease = await acquireSyncLock({
+      lockDir,
+      pid: 84,
+      token: secondToken,
+      processExists: () => true,
+      readProcessStartTicks: () => Promise.resolve("5678"),
+    });
+
+    await expect(readFile(join(lockDir, "owner"), "ascii")).resolves.toContain(secondToken);
+    await lease.release();
+  });
+
+  it("preserves a fresh empty lock directory while its owner may still be publishing", async () => {
+    const lockDir = await createLockPath();
+    await mkdir(lockDir);
+
+    await expect(
+      acquireSyncLock({
+        lockDir,
+        pid: 84,
+        token: secondToken,
+        processExists: () => true,
+        readProcessStartTicks: () => Promise.resolve("5678"),
+      }),
+    ).rejects.toMatchObject({ code: "SYNC_LOCK_HELD" });
+    await expect(readdir(lockDir)).resolves.toEqual([]);
+  });
+
+  it("preserves unexpected entries in an old ownerless lock directory", async () => {
+    const lockDir = await createLockPath();
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, "unexpected"), "keep", "ascii");
+    await agePath(lockDir);
+
+    await expect(
+      acquireSyncLock({
+        lockDir,
+        pid: 84,
+        token: secondToken,
+        processExists: () => false,
+        readProcessStartTicks: () => Promise.resolve("5678"),
+      }),
+    ).rejects.toMatchObject({ code: "SYNC_LOCK_HELD" });
+    await expect(readFile(join(lockDir, "unexpected"), "ascii")).resolves.toBe("keep");
+  });
+
   it("fails closed when an existing owner file is malformed", async () => {
     const lockDir = await createLockPath();
     await mkdir(lockDir);
@@ -165,4 +216,9 @@ async function writeOwner(
 
 async function expectPathToBeMissing(path: string): Promise<void> {
   await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });
+}
+
+async function agePath(path: string): Promise<void> {
+  const oldTimestamp = new Date(Date.now() - 61_000);
+  await utimes(path, oldTimestamp, oldTimestamp);
 }
