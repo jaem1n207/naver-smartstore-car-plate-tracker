@@ -114,10 +114,12 @@ Use this server layout:
   google-service-account.json
 
 /var/lib/naver-smartstore-car-plate-tracker/
-  deployed-sha
-  activation-state
-  deploy.lock
-  sync.lock/
+  runtime/                  # carplate:carplate; runtime coordination only
+    sync.lock/
+  deployment/               # root:root; never writable by runtime/build/deploy users
+    deployed-sha
+    activation-state
+    deploy.lock
 ```
 
 The existing repository-root `.env` moves to `/etc/naver-smartstore-car-plate-tracker/app.env`. The Google credential is also owned by `root:carplate` with mode `0640`. Neither file is readable by the build or deployment account or copied into a release. Each release contains a non-secret `release.env` with its `APP_REVISION` for startup logging.
@@ -177,7 +179,7 @@ Integration tests must cover requests A then B, B then A, equal revisions, diver
 
 The scheduler tracks its active synchronization promise. On `SIGTERM`, it stops accepting new cron triggers, waits for the active synchronization to settle, logs the shutdown result, and exits. The systemd stop timeout must exceed the expected maximum full-sync duration; an expired timeout is a deployment failure rather than silent success.
 
-Scheduler runs and `sync:once` use the same cross-process synchronization lock under `/var/lib/naver-smartstore-car-plate-tracker`. The lock records its owning PID and supports stale-owner recovery after a verified dead process. A deployment:
+Scheduler runs and `sync:once` use the same cross-process synchronization lock at `/var/lib/naver-smartstore-car-plate-tracker/runtime/sync.lock`. Only the runtime directory is writable by `carplate`; durable deployment state remains root-only under `/var/lib/naver-smartstore-car-plate-tracker/deployment`. The lock records its owning PID and supports stale-owner recovery after a verified dead process. A deployment:
 
 1. Acquires the deployment lock with a documented timeout.
 2. Requests a graceful systemd stop so no new scheduled sync can begin.
