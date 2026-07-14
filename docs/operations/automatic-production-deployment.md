@@ -220,6 +220,7 @@ sudo systemd-run --wait --collect --service-type=exec \
   --property=MemoryMax=600M --property=MemorySwapMax=1G --property=TasksMax=64 \
   --property=LimitFSIZE=536870912 --property=ProtectSystem=strict --property=ProtectHome=true \
   --property=PrivateTmp=true --property=NoNewPrivileges=true \
+  --property=IPAddressAllow=127.0.0.53/32 --property=IPAddressAllow=::1/128 \
   --property=IPAddressDeny=127.0.0.0/8 --property=IPAddressDeny=10.0.0.0/8 \
   --property=IPAddressDeny=172.16.0.0/12 --property=IPAddressDeny=192.168.0.0/16 \
   --property=IPAddressDeny=169.254.0.0/16 --property=IPAddressDeny=::1/128 \
@@ -231,6 +232,13 @@ sudo systemd-run --wait --collect --service-type=exec \
   --setenv="PNPM_STORE_DIR=$INITIAL_PACKAGE_STORE/store" \
   --setenv=npm_config_registry=https://registry.npmjs.org/ --setenv=npm_config_strict_ssl=true \
   /usr/local/bin/pnpm fetch --frozen-lockfile --ignore-scripts
+
+The fetch sandbox allows only the local DNS stub addresses needed by Ubuntu's
+`systemd-resolved` (`127.0.0.53` and IPv6 loopback) and denies other loopback,
+private, and link-local ranges. This keeps registry DNS resolution working
+without allowing package fetches to reach Oracle metadata or private network
+services.
+
 sudo systemd-run --wait --collect --service-type=exec \
   --uid=carplate-build --gid=carplate-build --working-directory="$INITIAL_RELEASE_SOURCE" \
   --property=MemoryMax=900M --property=MemorySwapMax=2G --property=TasksMax=128 \
