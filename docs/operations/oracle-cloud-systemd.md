@@ -1,99 +1,140 @@
 # Oracle Cloud systemd Operation
 
-Use this guide after the server has a fixed public IP and Naver Commerce API has allowed that IP.
+Use the ordered [automatic production deployment runbook](automatic-production-deployment.md) for the one-time migration, deploy key, GitHub environment, branch protection, first deployment, reboot check, rollback drill, and rotation procedures. This page is the shorter day-to-day systemd reference after that setup is complete.
 
-## Install
+The current legacy checkout at `/opt/naver-smartstore-car-plate-tracker` must be stopped and moved to `/srv/carplate-bootstrap-source` before bootstrap. The initial source cannot equal or sit below the managed `/opt` application root. PR #2 must then be merged with **Create a merge commit** so its bootstrapped head remains an ancestor of `main`; squash and rebase merge are invalid for this migration.
 
-```bash
-pnpm install --frozen-lockfile
-pnpm build
+## Production runtime contract
+
+Production runs immutable compiled JavaScript, not `tsx` and not `pnpm scheduler`:
+
+```text
+/usr/bin/node /opt/naver-smartstore-car-plate-tracker/current/dist/src/scheduler/main.js
 ```
 
-The production build compiles `src/` only through `tsconfig.build.json` and caps the TypeScript V8 heap at 768 MB. Keep the documented 2 GB swap active on a 1 GB Free Tier VM while building. Full source and test type checking remains available through `pnpm typecheck` on development and CI machines.
+The tracked unit is `ops/deployment/systemd/car-plate-tracker.service`. Its important boundaries are:
 
-## Environment
+- Runtime account: `carplate:carplate`.
+- Working directory: `/opt/naver-smartstore-car-plate-tracker/current`.
+- Secret environment: `/etc/naver-smartstore-car-plate-tracker/app.env`.
+- Non-secret revision: `/opt/naver-smartstore-car-plate-tracker/current/release.env`.
+- Shared synchronization lock: `/var/lib/naver-smartstore-car-plate-tracker/runtime/sync.lock`.
+- Startup dependency: `car-plate-tracker-recover.service` must reconcile deployment state first.
+- Restart: `on-failure`, with a 10-second delay.
+- Graceful stop: `SIGTERM` with `TimeoutStopSec=60min`, allowing an active sync to settle.
+- Writable path: only `/var/lib/naver-smartstore-car-plate-tracker/runtime`.
+- Node JIT: `MemoryDenyWriteExecute=false` is intentional.
 
-Create a server-only `.env` file outside git. Include the variables from `.env.example`. Store the Google service account JSON outside the repository and set `GOOGLE_APPLICATION_CREDENTIALS` to its absolute path.
-
-Start production with an hourly full sync:
+The default application cron is five minutes, but production should normally set an hourly full sync because every non-deleted product detail is read on each run. Keep this in the protected server environment:
 
 ```dotenv
 NODE_ENV=production
 SYNC_CRON=0 * * * *
+SYNC_LOCK_DIR=/var/lib/naver-smartstore-car-plate-tracker/runtime/sync.lock
 ```
 
-The worker currently reads every non-deleted product detail on each run. For stores with hundreds of products, a full run can take tens of minutes under Naver rate limits. Do not use the five-minute example schedule in production until the worker supports incremental sync.
+The bootstrap installs `app.env` and the Google key as `root:carplate` mode `0640`. Configure exactly one Google credential source; production uses the protected file path.
+
+## Service status
+
+**[Oracle]**
 
 ```bash
-sudo install -d -m 700 -o carplate -g carplate /etc/naver-smartstore-car-plate-tracker
-sudo chmod 600 /etc/naver-smartstore-car-plate-tracker/google-service-account.json
-sudo chown carplate:carplate /etc/naver-smartstore-car-plate-tracker/google-service-account.json
+# [Oracle]
+sudo systemctl is-enabled car-plate-tracker.service
+sudo systemctl is-active car-plate-tracker.service
+sudo systemctl show car-plate-tracker.service --property=ActiveState,SubState,MainPID,NRestarts,InvocationID,ExecMainStatus
+sudo systemctl status car-plate-tracker-recover.service --no-pager
+sudo journalctl -u car-plate-tracker.service -n 100 --no-pager --output=cat
 ```
 
-Do not set `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` when the file-path variable is configured.
+The expected startup record contains `scheduler started`, `mode: live`, the configured cron, and the active release SHA as `appRevision`. A completed job logs `scheduled sync completed`. A nonzero `sheetExtractionFailure` is a row-level result, not a scheduler failure; an actual job failure logs `scheduled sync failed`.
 
-## Service definition
+Keep detailed journal output on Oracle. Store names, counts, and application diagnostics are intentionally excluded from public GitHub Actions output.
 
-Resolve the exact `pnpm` path available to the service account:
+## Routine code deployment
+
+Merging a verified PR into `main` is the normal deployment. The workflow builds through the secretless `carplate-build` account, seals a root-owned release, drains the scheduler, takes the shared sync lock, switches `current`, and verifies the new systemd invocation.
+
+**[GitHub UI]** To retry current `main`, open **Actions > Production Deployment > Run workflow**, select `main`, and run it. This is preferred to an Oracle shell command.
+
+When GitHub Actions is unavailable and a server-side forward deployment is explicitly authorized, call the same locked deployer with an exact lowercase `main` SHA.
+
+**[Oracle]**
 
 ```bash
-sudo -u carplate -H sh -lc 'command -v pnpm'
+# [Oracle]
+export REQUESTED_SHA="replace-with-40-character-lowercase-main-sha"
+printf '%s\n' "$REQUESTED_SHA" | grep -Ex '[0-9a-f]{40}'
+sudo /usr/local/sbin/deploy-car-plate-tracker "$REQUESTED_SHA"
 ```
 
-Use that exact absolute path for `ExecStart` below. The example assumes `/usr/bin/pnpm`.
+Do not run `git pull`, replace `current`, install packages as root, or edit an immutable release. Equal and stale requests are successful no-ops; divergent history fails closed.
 
-Create `/etc/systemd/system/car-plate-tracker.service`:
+## Privileged maintenance boundary
 
-```ini
-[Unit]
-Description=Naver Smartstore Car Plate Tracker
-Wants=network-online.target
-After=network-online.target
+Routine `main` deployment does not update any of these files:
 
-[Service]
-Type=simple
-WorkingDirectory=/opt/naver-smartstore-car-plate-tracker
-EnvironmentFile=/opt/naver-smartstore-car-plate-tracker/.env
-ExecStart=/usr/bin/pnpm scheduler
-Restart=always
-RestartSec=10
-User=carplate
-Group=carplate
+- `/usr/local/sbin/car-plate-tracker-deploy-entrypoint`
+- `/usr/local/sbin/deploy-car-plate-tracker`
+- `/usr/local/sbin/recover-car-plate-tracker`
+- `/usr/local/lib/naver-smartstore-car-plate-tracker/`
+- `/etc/systemd/system/car-plate-tracker*.service`
+- `/etc/naver-smartstore-car-plate-tracker/`
+- `/etc/ssh/sshd_config.d/carplate-deploy.conf`
+- `/etc/sudoers.d/carplate-deploy`
 
-[Install]
-WantedBy=multi-user.target
-```
+Updating deployment scripts, units, secrets, deploy keys, SSH policy, or sudoers is an explicit reviewed bootstrap-maintenance operation. Follow the canonical runbook; do not copy a newly merged privileged script directly out of a release.
 
-Deploying the application files and activating the scheduler are separate server steps. First complete the code deployment and production build above, then create or update the unit definition. Updating the repository or `.env` does not automatically reload systemd, and reloading systemd does not deploy application code.
+## Manual one-time synchronization
 
-After the unit file is created or changed, activate the scheduler explicitly:
+The scheduler and compiled CLI share the same cross-process lock. Stop the scheduler to prevent a new cron trigger, run the CLI in a transient unit using the production environment, then restart the scheduler.
+
+**[Oracle]**
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now car-plate-tracker
-sudo systemctl status car-plate-tracker --no-pager
-sudo journalctl -u car-plate-tracker -f
+# [Oracle]
+sudo systemctl stop car-plate-tracker.service
+sudo systemd-run --wait --collect --service-type=exec \
+  --uid=carplate \
+  --gid=carplate \
+  --working-directory=/opt/naver-smartstore-car-plate-tracker/current \
+  --property=EnvironmentFile=/etc/naver-smartstore-car-plate-tracker/app.env \
+  --property=EnvironmentFile=-/opt/naver-smartstore-car-plate-tracker/current/release.env \
+  /usr/bin/node /opt/naver-smartstore-car-plate-tracker/current/dist/src/cli/sync-once.js
+sudo systemctl start car-plate-tracker.service
+sudo systemctl is-active car-plate-tracker.service
 ```
 
-The expected startup log contains `scheduler started`, the configured cron expression, and `mode: live`. `systemctl enable` starts the scheduler automatically after a server reboot.
+Do not manually delete `sync.lock`. The lock owner contract supports verified stale-owner recovery and fails closed on malformed or unexpected contents.
 
-For a later code-only deployment, stop the existing scheduler before replacing the application, install dependencies, and build. Then start the already-defined service again. For a unit or environment change, run `daemon-reload` and explicitly restart or enable the service as appropriate; do not treat a successful build as scheduler activation.
+## Reboot verification
+
+**[Oracle]**
 
 ```bash
-sudo systemctl stop car-plate-tracker
-# Deploy the new repository contents, then run pnpm install --frozen-lockfile and pnpm build.
-sudo systemctl start car-plate-tracker
-sudo systemctl status car-plate-tracker --no-pager
+# [Oracle]
+sudo systemctl is-enabled car-plate-tracker.service
+sudo reboot
 ```
 
-## Manual Maintenance
+After reconnecting:
 
-The scheduler prevents overlap only inside its own process. Stop the service before a manual `sync:once` so a separate process cannot write the same spreadsheet concurrently:
+**[Oracle]**
 
 ```bash
-sudo systemctl stop car-plate-tracker
-sudo -u carplate -H pnpm sync:once
-sudo systemctl start car-plate-tracker
+# [Oracle]
+sudo systemctl is-active car-plate-tracker.service
+sudo systemctl status car-plate-tracker-recover.service --no-pager
+sudo readlink /opt/naver-smartstore-car-plate-tracker/current
+sudo cat /var/lib/naver-smartstore-car-plate-tracker/deployment/deployed-sha
+sudo journalctl -b -u car-plate-tracker-recover.service -u car-plate-tracker.service --no-pager --output=cat
 ```
 
-Use `sudo journalctl -u car-plate-tracker -n 100 --no-pager` to review recent automatic runs. A completed scheduled job logs `scheduled sync completed` with `sheetExtractionFailure`, the number of rows across the whole managed sheet without successful plate extraction. A nonzero `sheetExtractionFailure` is a row-level extraction result, not a scheduler failure; the completion message means the job itself succeeded. An actual job failure logs `scheduled sync failed` instead.
+The `current` link, durable `deployed-sha`, and startup `appRevision` must agree.
+
+## Availability limits
+
+The MacBook may be shut down after setup. GitHub-hosted runners perform deployment, and the enabled systemd unit starts after an Oracle reboot. Recovery prevents an interrupted activation from starting an uncommitted release.
+
+systemd cannot guarantee that the VM stays powered on, GitHub can reach SSH, DNS works, the fixed IP remains allowed, credentials remain valid, Naver or Google is available, disk and swap remain sufficient, or every sync succeeds. `Restart=on-failure` restarts the process; it does not repair external services or application data. Use the [fixed-IP live smoke test](live-smoke-test.md) to verify real Naver and Google behavior.
