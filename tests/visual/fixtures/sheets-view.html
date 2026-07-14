@@ -7,20 +7,20 @@
     <link rel="stylesheet" href="./sheets-view.css" />
   </head>
   <body class="bg-slate-50 p-6 font-sans text-slate-900">
-    <main class="mx-auto w-[2410px]">
+    <main class="mx-auto w-[2490px]">
       <h1 class="mb-4 text-2xl font-bold">차량번호 동기화 결과</h1>
       <section class="mb-5 grid w-[1120px] grid-cols-4 gap-3" aria-label="sync summary">
         <div data-summary-card class="rounded-lg border border-slate-200 bg-white p-4">
           <span data-summary-label class="block text-xs text-slate-500">전체 등록 매물</span>
-          <strong class="mt-1.5 block text-2xl">5</strong>
+          <strong class="mt-1.5 block text-2xl">8</strong>
         </div>
         <div data-summary-card class="rounded-lg border border-slate-200 bg-white p-4">
           <span data-summary-label class="block text-xs text-slate-500">추출 성공</span>
-          <strong class="mt-1.5 block text-2xl">5</strong>
+          <strong class="mt-1.5 block text-2xl">8</strong>
         </div>
         <div data-summary-card class="rounded-lg border border-slate-200 bg-white p-4">
           <span data-summary-label class="block text-xs text-slate-500">중복 확인</span>
-          <strong class="mt-1.5 block text-2xl">4</strong>
+          <strong class="mt-1.5 block text-2xl">7</strong>
         </div>
         <div data-summary-card class="rounded-lg border border-slate-200 bg-white p-4">
           <span data-summary-label class="block text-xs text-slate-500">추출 실패</span>
@@ -32,7 +32,7 @@
       >
         <colgroup>
           <col class="w-[120px]" />
-          <col class="w-[160px]" />
+          <col class="w-[240px]" />
           <col class="w-[300px]" />
           <col class="w-[220px]" />
           <col class="w-[125px]" />
@@ -66,13 +66,13 @@
           <tr
             class="bg-white text-slate-900 [&>td]:border-b [&>td]:border-slate-100 [&>td]:px-3 [&>td]:py-2.5"
           >
-            <td class="border-t-2 border-[#B7791F] bg-[#FFF3C4] font-bold text-[#5B3A00]">
+            <td class="border-t-2 border-[#C5221F] bg-[#FCE8E6] font-bold text-[#8A1C1C]">
               123가4567
             </td>
             <td
-              class="border-t-2 border-r-2! border-[#B7791F] border-r-slate-400! bg-[#FFF3C4] font-bold text-[#5B3A00]"
+              class="border-t-2 border-r-2! border-[#C5221F] border-r-slate-400! bg-[#FCE8E6] font-bold text-[#8A1C1C]"
             >
-              내부 및 양쪽 중복
+              같은 스토어 + 두 스토어 중복
             </td>
             <td>
               <a
@@ -94,25 +94,21 @@
           <tr
             class="bg-slate-50 text-slate-900 [&>td]:border-b [&>td]:border-slate-100 [&>td]:px-3 [&>td]:py-2.5"
           >
-            <td class="border-b-2 border-[#B7791F] bg-[#FFF3C4] font-bold text-[#5B3A00]">
-              123가4567
-            </td>
-            <td
-              class="border-b-2 border-r-2! border-[#B7791F] border-r-slate-400! bg-[#FFF3C4] font-bold text-[#5B3A00]"
-            >
-              내부 및 양쪽 중복
+            <td class="bg-[#FCE8E6] font-bold text-[#8A1C1C]">123가4567</td>
+            <td class="border-r-2! border-r-slate-400! bg-[#FCE8E6] font-bold text-[#8A1C1C]">
+              같은 스토어 + 두 스토어 중복
             </td>
             <td>
               <a
                 class="font-semibold text-blue-700 underline"
-                href="https://example.com/products/4001"
-                >example.com/products/4001</a
+                href="https://example.com/products/2005"
+                >example.com/products/2005</a
               >
             </td>
-            <td>서부트럭 (store-west)</td>
+            <td>동부트럭 (store-east)</td>
             <td class="bg-[#FCE8D5] font-bold text-[#8A3B12]">SUSPENSION</td>
             <td class="bg-[#FCE8D5] font-bold text-[#8A3B12]">OUTOFSTOCK</td>
-            <td>합성 데이터 냉동탑차</td>
+            <td>합성 데이터 냉동탑차 장축</td>
             <td>2026-07-09 09:05</td>
             <td>2026-07-11 06:35</td>
             <td></td>
@@ -122,13 +118,41 @@
           <tr
             class="bg-white text-slate-900 [&>td]:border-b [&>td]:border-slate-100 [&>td]:px-3 [&>td]:py-2.5"
           >
+            <td class="border-b-2 border-[#C5221F] bg-[#E8F0FE] font-bold text-[#174EA6]">
+              123가4567
+            </td>
+            <td
+              class="border-b-2 border-r-2! border-[#C5221F] border-r-slate-400! bg-[#E8F0FE] font-bold text-[#174EA6]"
+            >
+              두 스토어 간 중복
+            </td>
+            <td>
+              <a
+                class="font-semibold text-blue-700 underline"
+                href="https://example.com/products/4001"
+                >example.com/products/4001</a
+              >
+            </td>
+            <td>서부트럭 (store-west)</td>
+            <td>ON</td>
+            <td>SALE</td>
+            <td>합성 데이터 냉동탑차</td>
+            <td>2026-07-09 09:07</td>
+            <td>2026-07-11 06:35</td>
+            <td></td>
+            <td></td>
+            <td></td>
+          </tr>
+          <tr
+            class="bg-slate-50 text-slate-900 [&>td]:border-b [&>td]:border-slate-100 [&>td]:px-3 [&>td]:py-2.5"
+          >
             <td class="border-t-2 border-[#B7791F] bg-[#FFF3C4] font-bold text-[#5B3A00]">
               234나5678
             </td>
             <td
               class="border-t-2 border-r-2! border-[#B7791F] border-r-slate-400! bg-[#FFF3C4] font-bold text-[#5B3A00]"
             >
-              스토어 내부 중복
+              같은 스토어 내 중복
             </td>
             <td>
               <a
@@ -148,7 +172,7 @@
             <td></td>
           </tr>
           <tr
-            class="bg-slate-50 text-slate-900 [&>td]:border-b [&>td]:border-slate-100 [&>td]:px-3 [&>td]:py-2.5"
+            class="bg-white text-slate-900 [&>td]:border-b [&>td]:border-slate-100 [&>td]:px-3 [&>td]:py-2.5"
           >
             <td class="border-b-2 border-[#B7791F] bg-[#FFF3C4] font-bold text-[#5B3A00]">
               234나5678
@@ -156,7 +180,7 @@
             <td
               class="border-b-2 border-r-2! border-[#B7791F] border-r-slate-400! bg-[#FFF3C4] font-bold text-[#5B3A00]"
             >
-              스토어 내부 중복
+              같은 스토어 내 중복
             </td>
             <td>
               <a
@@ -175,7 +199,65 @@
             <td></td>
             <td></td>
           </tr>
-          <tr class="bg-white [&>td]:border-b [&>td]:border-slate-100 [&>td]:px-3 [&>td]:py-2.5">
+          <tr
+            class="bg-slate-50 text-slate-900 [&>td]:border-b [&>td]:border-slate-100 [&>td]:px-3 [&>td]:py-2.5"
+          >
+            <td class="border-t-2 border-[#3B6FC4] bg-[#E8F0FE] font-bold text-[#174EA6]">
+              456라7890
+            </td>
+            <td
+              class="border-t-2 border-r-2! border-[#3B6FC4] border-r-slate-400! bg-[#E8F0FE] font-bold text-[#174EA6]"
+            >
+              두 스토어 간 중복
+            </td>
+            <td>
+              <a
+                class="font-semibold text-blue-700 underline"
+                href="https://example.com/products/2004"
+                >example.com/products/2004</a
+              >
+            </td>
+            <td>동부트럭 (store-east)</td>
+            <td>ON</td>
+            <td>SALE</td>
+            <td>합성 데이터 덤프트럭</td>
+            <td>2026-07-09 09:14</td>
+            <td>2026-07-11 06:35</td>
+            <td></td>
+            <td></td>
+            <td></td>
+          </tr>
+          <tr
+            class="bg-white text-slate-900 [&>td]:border-b [&>td]:border-slate-100 [&>td]:px-3 [&>td]:py-2.5"
+          >
+            <td class="border-b-2 border-[#3B6FC4] bg-[#E8F0FE] font-bold text-[#174EA6]">
+              456라7890
+            </td>
+            <td
+              class="border-b-2 border-r-2! border-[#3B6FC4] border-r-slate-400! bg-[#E8F0FE] font-bold text-[#174EA6]"
+            >
+              두 스토어 간 중복
+            </td>
+            <td>
+              <a
+                class="font-semibold text-blue-700 underline"
+                href="https://example.com/products/4003"
+                >example.com/products/4003</a
+              >
+            </td>
+            <td>서부트럭 (store-west)</td>
+            <td>ON</td>
+            <td>SALE</td>
+            <td>합성 데이터 카고트럭</td>
+            <td>2026-07-09 09:15</td>
+            <td>2026-07-11 06:35</td>
+            <td></td>
+            <td></td>
+            <td></td>
+          </tr>
+          <tr
+            class="bg-slate-50 text-slate-900 [&>td]:border-b [&>td]:border-slate-100 [&>td]:px-3 [&>td]:py-2.5"
+          >
             <td>345다6789</td>
             <td class="border-r-2! border-r-slate-400!">중복 없음</td>
             <td>

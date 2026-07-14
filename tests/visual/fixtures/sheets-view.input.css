@@ -19,3 +19,13 @@ html.dark [data-summary-card] {
 html.dark [data-summary-label] {
   color: #cbd5e1;
 }
+
+html.dark tbody tr.bg-white > td:not([class*="bg-"]) {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+html.dark tbody tr.bg-slate-50 > td:not([class*="bg-"]) {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
