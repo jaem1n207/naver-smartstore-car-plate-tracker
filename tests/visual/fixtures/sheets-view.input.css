@@ -1,9 +1,101 @@
 @import "tailwindcss";
 @source "./sheets-view.html";
 
+/* The fixture's glyph shards stay local without duplicating font binaries in the repository. */
+@font-face {
+  font-family: "Noto Sans KR Variable";
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url("../../../node_modules/@fontsource-variable/noto-sans-kr/files/noto-sans-kr-119-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+20, U+28, U+29, U+2D, U+2E, U+2F, U+30, U+31, U+32, U+33, U+34, U+35, U+36, U+37, U+38, U+3A,
+    U+41, U+43, U+44, U+45, U+46, U+4B, U+4C, U+4F, U+50, U+52, U+53, U+54, U+55, U+56, U+57, U+61,
+    U+63, U+64, U+65, U+68, U+69, U+6C, U+6D, U+6F, U+70, U+72, U+73, U+74, U+75, U+77, U+78,
+    U+AC00, U+ACE0, U+AE30, U+B2E4, U+B9AC, U+C2A4, U+C2DC, U+C774, U+C778, U+C9C0;
+}
+
+@font-face {
+  font-family: "Noto Sans KR Variable";
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url("../../../node_modules/@fontsource-variable/noto-sans-kr/files/noto-sans-kr-116-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range: U+2B, U+AC19, U+ACB0, U+B2F4, U+B450, U+B958, U+CD08, U+D488, U+D544, U+D655;
+}
+
+@font-face {
+  font-family: "Noto Sans KR Variable";
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url("../../../node_modules/@fontsource-variable/noto-sans-kr/files/noto-sans-kr-118-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+39, U+49, U+4D, U+4E, U+AC04, U+AC8C, U+ACF5, U+ACFC, U+AD00, U+B098, U+B0B4, U+B3D9, U+B77C,
+    U+B85D, U+B9C8, U+BA54, U+BA85, U+BAA8, U+BC14, U+BC88, U+BD80, U+C0C1, U+C11C, U+C131, U+C5B4,
+    U+C624, U+C694, U+C740, U+C74C, U+C77C, U+C790, U+C7A5, U+C804, U+C911, U+CCB4, U+CE74, U+D130,
+    U+D2B8, U+D504, U+D569, U+D638, U+D654;
+}
+
+@font-face {
+  font-family: "Noto Sans KR Variable";
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url("../../../node_modules/@fontsource-variable/noto-sans-kr/files/noto-sans-kr-117-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+AC10, U+B2F9, U+B370, U+B4F1, U+B514, U+B9E4, U+BB3C, U+BCF5, U+C2E4, U+C5C6, U+C7AC, U+C9D1,
+    U+CC28, U+CD5C, U+CD94, U+CD9C, U+D0DC, U+D1A0, U+D45C;
+}
+
+@font-face {
+  font-family: "Noto Sans KR Variable";
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url("../../../node_modules/@fontsource-variable/noto-sans-kr/files/noto-sans-kr-111-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range: U+B0C9, U+B364;
+}
+
+@font-face {
+  font-family: "Noto Sans KR Variable";
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url("../../../node_modules/@fontsource-variable/noto-sans-kr/files/noto-sans-kr-115-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range: U+B7C9, U+B9C9, U+CD95, U+D328;
+}
+
+@font-face {
+  font-family: "Noto Sans KR Variable";
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url("../../../node_modules/@fontsource-variable/noto-sans-kr/files/noto-sans-kr-112-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range: U+B7ED, U+D0D1;
+}
+
+@font-face {
+  font-family: "Noto Sans KR Variable";
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url("../../../node_modules/@fontsource-variable/noto-sans-kr/files/noto-sans-kr-108-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range: U+C719;
+}
+
 @theme {
   --font-sans:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    "Noto Sans KR Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
 }
 
 html.dark body {

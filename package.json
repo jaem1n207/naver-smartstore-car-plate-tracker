@@ -11,14 +11,17 @@
     "format:check": "prettier . --check",
     "build:visual-css": "tailwindcss -i tests/visual/fixtures/sheets-view.input.css -o tests/visual/fixtures/sheets-view.css --minify",
     "test": "pnpm test:all",
-    "test:all": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:unit && pnpm test:integration && pnpm test:e2e && pnpm test:visual",
+    "test:all": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:unit && pnpm test:integration && pnpm test:deployment && pnpm test:e2e && pnpm test:visual",
     "test:unit": "vitest run tests/unit --passWithNoTests",
     "test:integration": "vitest run tests/integration --passWithNoTests",
-    "test:e2e": "playwright test tests/e2e",
+    "test:deployment": "vitest run tests/deployment --passWithNoTests",
+    "test:e2e": "pnpm build && playwright test tests/e2e",
     "test:visual": "pnpm build:visual-css && playwright test tests/visual",
     "test:watch": "vitest",
     "sync:once": "tsx src/cli/sync-once.ts",
-    "scheduler": "tsx src/scheduler/main.ts"
+    "sync:once:production": "node dist/src/cli/sync-once.js",
+    "scheduler": "tsx src/scheduler/main.ts",
+    "scheduler:production": "node dist/src/scheduler/main.js"
   },
   "engines": {
     "node": ">=22.13"
@@ -36,6 +39,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@fontsource-variable/noto-sans-kr": "^5.2.10",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/cli": "^4.3.2",
     "@types/he": "^1.2.3",
@@ -51,6 +55,7 @@
     "tsx": "^4.23.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.63.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "yaml": "^2.9.0"
   }
 }

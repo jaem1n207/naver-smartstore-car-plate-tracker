@@ -1,21 +1,20 @@
-import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 
-const localChromeExecutable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const launchOptions = existsSync(localChromeExecutable)
-  ? { executablePath: localChromeExecutable }
-  : {};
+const fixtureUrl = pathToFileURL(resolve("tests/visual/fixtures/sheets-view.html")).toString();
 
-test.use({ launchOptions });
+test.beforeEach(async ({ page }) => {
+  await page.goto(fixtureUrl);
+  await page.evaluate("document.fonts.ready");
+  const fontState = await page.evaluate<{ count: number; loaded: boolean }>(
+    "({ count: document.fonts.size, loaded: Array.from(document.fonts).every((fontFace) => fontFace.status === 'loaded') })",
+  );
+  expect(fontState).toEqual({ count: 8, loaded: true });
+  await expect(page.locator("body")).toHaveCSS("font-family", /^"Noto Sans KR Variable"/);
+});
 
 test("sheet operator view remains readable", async ({ page }) => {
-  const fixtureUrl = pathToFileURL(resolve("tests/visual/fixtures/sheets-view.html")).toString();
-
-  await page.setViewportSize({ width: 2540, height: 720 });
-  await page.goto(fixtureUrl);
-
   expect(await documentFitsViewport(page)).toBe(true);
 
   await expect(page).toHaveScreenshot("sheets-view.png", {
@@ -25,10 +24,6 @@ test("sheet operator view remains readable", async ({ page }) => {
 });
 
 test("sheet operator colors remain readable against dark chrome", async ({ page }) => {
-  const fixtureUrl = pathToFileURL(resolve("tests/visual/fixtures/sheets-view.html")).toString();
-
-  await page.setViewportSize({ width: 2540, height: 720 });
-  await page.goto(fixtureUrl);
   await page.evaluate("document.documentElement.classList.add('dark')");
 
   expect(await documentFitsViewport(page)).toBe(true);

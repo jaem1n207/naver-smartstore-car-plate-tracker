@@ -8,7 +8,7 @@ import { LiveNaverCommerceClient } from "../naver/client.js";
 import { MockNaverCommerceClient } from "../naver/mock-client.js";
 import { GoogleSheetRepository } from "../sheets/google-repository.js";
 import { InMemorySheetRepository } from "../sheets/in-memory-repository.js";
-import { runSyncJob } from "../sync/sync-job.js";
+import { runLockedSyncJob } from "../sync/run-locked-sync-job.js";
 
 async function main(): Promise<void> {
   const env = loadEnv();
@@ -30,13 +30,16 @@ async function main(): Promise<void> {
         })
       : new InMemorySheetRepository();
 
-  const result = await runSyncJob({
-    env,
-    stores: selectedStores,
-    naverClient,
-    sheetRepository,
-    now: () => new Date(),
-  });
+  const result = await runLockedSyncJob(
+    {
+      env,
+      stores: selectedStores,
+      naverClient,
+      sheetRepository,
+      now: () => new Date(),
+    },
+    { lockDir: env.syncLockDir },
+  );
 
   logger.info(result, "sync completed");
 }

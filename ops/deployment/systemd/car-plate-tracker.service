@@ -1,0 +1,43 @@
+[Unit]
+Description=Naver Smartstore car plate tracker scheduler
+Wants=network-online.target
+After=network-online.target car-plate-tracker-recover.service
+Requires=car-plate-tracker-recover.service
+
+[Service]
+Type=simple
+User=carplate
+Group=carplate
+WorkingDirectory=/opt/naver-smartstore-car-plate-tracker/current
+EnvironmentFile=/etc/naver-smartstore-car-plate-tracker/app.env
+EnvironmentFile=-/opt/naver-smartstore-car-plate-tracker/current/release.env
+ExecStart=/usr/bin/node /opt/naver-smartstore-car-plate-tracker/current/dist/src/scheduler/main.js
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=60min
+KillMode=control-group
+UMask=0027
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+MemoryDenyWriteExecute=false
+ReadOnlyPaths=/etc/naver-smartstore-car-plate-tracker
+ReadOnlyPaths=/opt/naver-smartstore-car-plate-tracker/current
+ReadWritePaths=/var/lib/naver-smartstore-car-plate-tracker/runtime
+
+[Install]
+WantedBy=multi-user.target
