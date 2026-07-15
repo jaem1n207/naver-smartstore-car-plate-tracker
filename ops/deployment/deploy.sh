@@ -211,6 +211,20 @@ _deploy_fetch_and_classify() {
   printf '%s\n' "$classification"
 }
 
+_deploy_privileged_revision_allows() {
+  [[ $# -eq 1 ]] || return 1
+  local requested_sha=$1
+  local privileged_sha
+
+  privileged_sha=$(_deploy_read_sha_file "$DEPLOY_STATE_ROOT/privileged-sha") || return 1
+  git --git-dir="$DEPLOY_REPOSITORY" cat-file -e "${privileged_sha}^{commit}" 2>/dev/null ||
+    return 1
+  git --git-dir="$DEPLOY_REPOSITORY" merge-base --is-ancestor \
+    "$privileged_sha" "$requested_sha" 2>/dev/null || return 1
+  git --git-dir="$DEPLOY_REPOSITORY" diff --quiet \
+    "$privileged_sha" "$requested_sha" -- ops/deployment
+}
+
 _deploy_request_is_current_main() {
   local requested_sha=$1
   local origin_head
@@ -1107,6 +1121,13 @@ deploy_main() {
     forward|initial) ;;
     *) return 1 ;;
   esac
+
+  if ! _deploy_privileged_revision_allows "$DEPLOY_REQUESTED_SHA"; then
+    DEPLOY_RECOVERY_HANDLED=1
+    _deploy_emit_result privileged_maintenance_required "$DEPLOY_REQUESTED_SHA" \
+      "$DEPLOY_PREVIOUS_SHA" "$DEPLOY_PREVIOUS_SHA" "$DEPLOY_DIAGNOSTIC_ID" || return 1
+    return 1
+  fi
 
   _deploy_preflight || return 1
   _deploy_stop_for_deployment || return 1

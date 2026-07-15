@@ -191,6 +191,63 @@ describe("deployment request validation and monotonic revisions", () => {
     expect(await fixture.currentRevision()).toBe(fixture.revisions.a);
     expect(await fixture.serviceIsActive()).toBe(true);
   }, 30_000);
+
+  it("keeps privileged maintenance pending across later application pushes and manual retries", async () => {
+    const fixture = await DeploymentFixture.create();
+    await fixture.setMain(fixture.revisions.a);
+    expect((await fixture.deploy(fixture.revisions.a)).code).toBe(0);
+    const operationsBeforeMaintenance = await fixture.systemctlLog();
+
+    const privilegedRevision = await fixture.commitPrivilegedChange();
+    const privilegedResult = await fixture.deploy(privilegedRevision);
+
+    expect(privilegedResult.code).toBe(1);
+    expect(parseResult(privilegedResult.stdout)).toMatchObject({
+      activatedSha: fixture.revisions.a,
+      outcome: "privileged_maintenance_required",
+      requestedSha: privilegedRevision,
+    });
+    expect(await fixture.currentRevision()).toBe(fixture.revisions.a);
+    expect(await fixture.systemctlLog()).toBe(operationsBeforeMaintenance);
+
+    const applicationRevision = await fixture.commitApplicationChange();
+    const followUpResult = await fixture.deploy(applicationRevision);
+
+    expect(followUpResult.code).toBe(1);
+    expect(parseResult(followUpResult.stdout)).toMatchObject({
+      activatedSha: fixture.revisions.a,
+      outcome: "privileged_maintenance_required",
+      requestedSha: applicationRevision,
+    });
+    expect(await fixture.currentRevision()).toBe(fixture.revisions.a);
+    expect(await fixture.systemctlLog()).toBe(operationsBeforeMaintenance);
+
+    await fixture.writePrivilegedRevision(applicationRevision);
+    const reviewedRetry = await fixture.deploy(applicationRevision);
+
+    expect(reviewedRetry.code, reviewedRetry.stderr).toBe(0);
+    expect(parseResult(reviewedRetry.stdout)).toMatchObject({
+      activatedSha: applicationRevision,
+      outcome: "deployed",
+      requestedSha: applicationRevision,
+    });
+  }, 30_000);
+
+  it("fails closed before service changes when the privileged revision marker is invalid", async () => {
+    const fixture = await DeploymentFixture.create();
+    await fixture.writePrivilegedRevision("invalid");
+
+    const result = await fixture.deploy(fixture.revisions.b);
+
+    expect(result.code).toBe(1);
+    expect(parseResult(result.stdout)).toMatchObject({
+      activatedSha: "",
+      outcome: "privileged_maintenance_required",
+      requestedSha: fixture.revisions.b,
+    });
+    expect(await fixture.currentRevision()).toBeNull();
+    expect(await fixture.systemctlLog()).toBe("");
+  });
 });
 
 describe("deployment preflight and coordination", () => {
@@ -985,6 +1042,47 @@ class DeploymentFixture {
     await runProcessExpectSuccess("git", ["-C", this.origin, "update-ref", "refs/heads/main", sha]);
   }
 
+  async commitPrivilegedChange(): Promise<string> {
+    await runProcessExpectSuccess("git", ["-C", this.origin, "reset", "-q", "--hard"]);
+    await writeFile(join(this.origin, "ops", "deployment", "runtime-version"), "v2\n");
+    await runProcessExpectSuccess("git", [
+      "-C",
+      this.origin,
+      "add",
+      "ops/deployment/runtime-version",
+    ]);
+    await runProcessExpectSuccess("git", [
+      "-C",
+      this.origin,
+      "commit",
+      "-q",
+      "-m",
+      "privileged change",
+    ]);
+    return await gitRevision(this.origin);
+  }
+
+  async commitApplicationChange(): Promise<string> {
+    await writeFile(
+      join(this.origin, "dist", "src", "scheduler", "main.js"),
+      "'use strict'; console.log('application follow-up');\n",
+    );
+    await runProcessExpectSuccess("git", ["-C", this.origin, "add", "dist/src/scheduler/main.js"]);
+    await runProcessExpectSuccess("git", [
+      "-C",
+      this.origin,
+      "commit",
+      "-q",
+      "-m",
+      "application follow-up",
+    ]);
+    return await gitRevision(this.origin);
+  }
+
+  async writePrivilegedRevision(sha: string): Promise<void> {
+    await writeFile(join(this.stateRoot, "privileged-sha"), `${sha}\n`, { mode: 0o600 });
+  }
+
   async configureMaliciousRepositoryRemote(): Promise<void> {
     const malicious = join(this.root, "malicious");
     await runProcessExpectSuccess("git", ["init", "-q", "--bare", malicious]);
@@ -1152,6 +1250,7 @@ class DeploymentFixture {
     await mkdir(join(this.appRoot, "candidates"), { recursive: true, mode: 0o700 });
     await mkdir(join(this.appRoot, "releases"), { mode: 0o700 });
     await mkdir(this.stateRoot, { recursive: true, mode: 0o700 });
+    await this.writePrivilegedRevision(this.revisions.a);
     await mkdir(this.runtimeRoot, { mode: process.platform === "linux" ? 0o2770 : 0o770 });
     await chmod(this.runtimeRoot, process.platform === "linux" ? 0o2770 : 0o770);
     await mkdir(this.controlRoot, { mode: 0o700 });
@@ -1370,6 +1469,7 @@ function parseResult(stdout: string): Record<string, string> {
 async function writeReleaseSource(repository: string, label: string): Promise<void> {
   await mkdir(join(repository, "dist", "src", "scheduler"), { recursive: true });
   await mkdir(join(repository, "node_modules", "runtime"), { recursive: true });
+  await mkdir(join(repository, "ops", "deployment"), { recursive: true });
   await writeFile(join(repository, "package.json"), '{"name":"fixture"}\n');
   await writeFile(
     join(repository, "dist", "src", "scheduler", "main.js"),
@@ -1379,6 +1479,7 @@ async function writeReleaseSource(repository: string, label: string): Promise<vo
     join(repository, "node_modules", "runtime", "index.js"),
     "module.exports = {};\n",
   );
+  await writeFile(join(repository, "ops", "deployment", "runtime-version"), "v1\n");
 }
 
 async function gitRevision(repository: string): Promise<string> {
