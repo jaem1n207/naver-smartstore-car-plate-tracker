@@ -360,7 +360,7 @@ It creates and owns these production paths:
 - `/opt/naver-smartstore-car-plate-tracker`: root-owned bare mirror, candidates, package store, immutable releases, and `current`/`previous` links.
 - `/etc/naver-smartstore-car-plate-tracker`: `app.env`, Google credential, and root-controlled deploy authorized key.
 - `/var/lib/naver-smartstore-car-plate-tracker/runtime`: `root:carplate` mode `2770`; shared sync lock only.
-- `/var/lib/naver-smartstore-car-plate-tracker/deployment`: `root:root` mode `0700`; deployment lock, durable marker, and activation state.
+- `/var/lib/naver-smartstore-car-plate-tracker/deployment`: `root:root` mode `0700`; deployment lock, durable release marker, reviewed `privileged-sha`, and activation state.
 - `/usr/local/sbin` and `/usr/local/lib/naver-smartstore-car-plate-tracker`: installed root-owned deploy, recovery, build, and helper programs.
 
 Run bootstrap only from the root-owned immutable reviewed source. It copies the current environment to `app.env`, removes both Google credential variables from that copy, and adds the protected file path. The destination secret files become `root:carplate` mode `0640`.
@@ -381,9 +381,9 @@ sudo env \
   /usr/bin/bash "$REVIEWED_SOURCE/ops/deployment/bootstrap.sh"
 ```
 
-Bootstrap is repeat-safe only when existing markers, links, releases, accounts, and source files still satisfy the validated contract. It fails closed on disagreement. Do not delete state merely to make a rerun pass.
+Bootstrap is repeat-safe only when existing markers, links, releases, accounts, and source files still satisfy the validated contract. It requires every allowlisted file in the immutable reviewed `ops/deployment/` tree to match the same path at `CARPLATE_INITIAL_RELEASE_SOURCE` Git `HEAD`. It fails closed on disagreement. Do not delete state merely to make a rerun pass.
 
-On a maintenance rerun, bootstrap records the active scheduler `InvocationID`, installs the reviewed privileged files, explicitly restarts the service, and refuses success unless a different invocation remains active with the same restart count for the bounded 15-second bootstrap health window. The window allows a cold Node.js process on the free-tier VM to publish its structured startup record without weakening the invocation or restart checks. `enable --now` alone is not treated as proof that an already-running process loaded the new installation.
+On a maintenance rerun, bootstrap records the active scheduler `InvocationID`, installs the reviewed privileged files, explicitly restarts the service, and refuses success unless a different invocation remains active with the same restart count for the bounded 15-second bootstrap health window. Only after that check succeeds does it atomically write `privileged-sha` for the exact reviewed Git revision. The window allows a cold Node.js process on the free-tier VM to publish its structured startup record without weakening the invocation or restart checks. `enable --now` alone is not treated as proof that an already-running process loaded the new installation.
 
 Verify users, ownership, installed policy, the initial release, and the compiled service without displaying secrets.
 
@@ -501,16 +501,17 @@ If the push workflow was skipped or must be retried, manually deploy current `ma
 
 The deploy job prints one allowlisted result containing only `outcome`, requested SHA, previous SHA, activated SHA, and a diagnostic ID. Interpret `outcome` as follows:
 
-| Outcome                         | Meaning                                                                                                                      | Action                                                             |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `deployed`                      | New forward revision was built, activated, and stable for the health window.                                                 | Verify Oracle state, then continue.                                |
-| `unchanged`                     | That revision was already deployed.                                                                                          | Successful no-op.                                                  |
-| `superseded`                    | A newer descendant is already deployed.                                                                                      | Successful no-op; production did not move backward.                |
-| `candidate_failed_restarted`    | Install/build/seal failed; the existing release restarted and passed health.                                                 | Inspect Oracle diagnostics and fix the candidate.                  |
-| `activation_failed_rolled_back` | Candidate start/health failed; the previous release was restored and verified.                                               | Inspect the candidate and keep production on the previous release. |
-| `deployment_failed`             | Deployment failed before a service recovery transition was required.                                                         | Inspect preflight, revision, layout, and lock state.               |
-| `deployment_failed_recovered`   | An unexpected deployment failure occurred after stop/activation began, and emergency recovery restored the previous release. | Inspect Oracle before retrying.                                    |
-| `deployment_recovery_failed`    | Deployment failed and no release could be verified as active.                                                                | Treat as an incident and use the maintenance login immediately.    |
+| Outcome                           | Meaning                                                                                                                                           | Action                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `deployed`                        | New forward revision was built, activated, and stable for the health window.                                                                      | Verify Oracle state, then continue.                                                     |
+| `unchanged`                       | That revision was already deployed.                                                                                                               | Successful no-op.                                                                       |
+| `superseded`                      | A newer descendant is already deployed.                                                                                                           | Successful no-op; production did not move backward.                                     |
+| `privileged_maintenance_required` | The server's reviewed root-owned deployment assets do not match the requested revision. The scheduler was not stopped and no candidate was built. | Freeze merges, run exact-SHA privileged bootstrap, then retry with `workflow_dispatch`. |
+| `candidate_failed_restarted`      | Install/build/seal failed; the existing release restarted and passed health.                                                                      | Inspect Oracle diagnostics and fix the candidate.                                       |
+| `activation_failed_rolled_back`   | Candidate start/health failed; the previous release was restored and verified.                                                                    | Inspect the candidate and keep production on the previous release.                      |
+| `deployment_failed`               | Deployment failed before a service recovery transition was required.                                                                              | Inspect preflight, revision, layout, and lock state.                                    |
+| `deployment_failed_recovered`     | An unexpected deployment failure occurred after stop/activation began, and emergency recovery restored the previous release.                      | Inspect Oracle before retrying.                                                         |
+| `deployment_recovery_failed`      | Deployment failed and no release could be verified as active.                                                                                     | Treat as an incident and use the maintenance login immediately.                         |
 
 Candidate and recovery outcomes return a failing workflow even when the previous release was restored. That is intentional.
 
@@ -723,17 +724,20 @@ The CLI and scheduler both acquire `/var/lib/naver-smartstore-car-plate-tracker/
 
 Routine `main` deployments never install changed files from `ops/deployment/`. Any change to deployment scripts, systemd units, SSH restrictions, sudoers, or production secrets requires a reviewed maintenance window and an explicit bootstrap rerun.
 
-The production workflow classifies every `main` push before opening an SSH connection. When the pushed revision changes `ops/deployment/`, `Verify` still validates the repository, but `Deploy production` stops at **Require reviewed privileged maintenance** with a deliberate failure. This is not a candidate-build failure: the root-owned deployer has not been updated yet, and allowing that deployer to replace itself would violate the privileged trust boundary.
+The production workflow classifies every `main` push before opening an SSH connection. It uses read-only GitHub Actions metadata to compare the last successful `main` production workflow revision with the requested revision, so a later application-only push cannot hide an earlier uninstalled `ops/deployment/` change. If the workflow cannot establish that trusted revision, it fails closed. When the accumulated range changes `ops/deployment/`, `Verify` still validates the repository, but `Deploy production` stops at **Require reviewed privileged maintenance** with a deliberate failure. This workflow check is early operator feedback, not the authoritative security boundary.
+
+Oracle persists the exact reviewed privileged revision in root-only `/var/lib/naver-smartstore-car-plate-tracker/deployment/privileged-sha`. Bootstrap verifies every installed deployment script and systemd unit against the corresponding Git blob and writes this marker only after the restarted scheduler passes readiness. Before any forward deployment, the root deployer requires the marker to be an ancestor of the request with no `ops/deployment/` difference. Therefore a later application-only push and `workflow_dispatch` both remain blocked until reviewed maintenance succeeds.
 
 Use this order for a privileged-only change:
 
 1. Confirm that `Verify` passed for the merged `main` SHA and that the deployment gate reports `Privileged maintenance required`.
 2. Freeze additional merges and record the exact 40-character `main` SHA.
 3. Preserve the current protected environment, Google credential, deployment public key, and installed privileged assets in a root-only backup.
-4. Fetch that exact SHA into a new root-only bare repository, export only `ops/deployment/`, and make the exported tree root-owned and non-writable as shown below.
-5. Run `bootstrap.sh` from that immutable reviewed source. A maintenance rerun validates the existing known-good release, installs the reviewed privileged files, and requires a new healthy scheduler invocation.
-6. In GitHub Actions, run **Production Deployment** with `workflow_dispatch` on `main`. Manual dispatch intentionally bypasses the push-diff gate because the operator has completed the privileged installation.
-7. Verify `outcome: deployed`, then confirm `deployed-sha`, `current`, the scheduler startup revision, zero unexpected restarts, and an absent `activation-state` file.
+4. Prepare a new secretless built checkout at that exact SHA outside managed `/opt`. Repeat the build sandbox from section 6 with `main`, new maintenance-specific source/package-store paths, and require its `HEAD` to equal the recorded SHA. Do not reuse an older checkout or infer equivalence from file contents.
+5. Fetch the same exact SHA into a new root-only bare repository, export only `ops/deployment/`, and make the exported tree root-owned and non-writable as shown below.
+6. Run `bootstrap.sh` from that immutable reviewed source with the exact built checkout as `CARPLATE_INITIAL_RELEASE_SOURCE`. A maintenance rerun validates the existing known-good release, verifies both source trees describe the same Git revision, installs the reviewed privileged files, requires a new healthy scheduler invocation, and only then records `privileged-sha`.
+7. Verify `privileged-sha` equals the maintenance SHA. In GitHub Actions, run **Production Deployment** with `workflow_dispatch` on `main`. Manual dispatch bypasses only the push-history classifier; the server-side marker/tree check still applies. A successful dispatch becomes the next trusted production workflow baseline.
+8. Verify `outcome: deployed`, then confirm `deployed-sha`, `current`, the scheduler startup revision, zero unexpected restarts, and an absent `activation-state` file.
 
 Do not repeatedly rerun a gated push before step 5. The same old root-owned deployer will continue to run, so a source-only fix to `ops/deployment/` cannot repair its own production installation.
 
@@ -750,7 +754,7 @@ ssh-keygen -t ed25519 -a 100 -N '' -f "$ROTATED_DEPLOY_KEY" -C "github-actions-c
 scp "$ROTATED_DEPLOY_KEY.pub" "${OCI_MAINTENANCE_USER}@${OCI_DEPLOY_HOST}:/tmp/carplate-deploy-rotated.pub"
 ```
 
-Stage protected copies of the current runtime configuration. Then fetch the exact reviewed current `main` SHA into a fresh root-only repository and export an immutable copy of `ops/deployment`. Never rerun root bootstrap from the old writable checkout or from a previously reviewed source. Freeze merges during this short window because only one deployment key is accepted.
+Stage protected copies of the current runtime configuration. Prepare a fresh secretless built checkout at the exact reviewed current `main` SHA by repeating section 6 with `main` and maintenance-specific paths. Then fetch that same SHA into a fresh root-only repository and export an immutable copy of `ops/deployment`. Never rerun root bootstrap from the old writable checkout or from a previously reviewed source. Freeze merges during this short window because only one deployment key is accepted.
 
 **[Oracle]**
 
@@ -763,6 +767,10 @@ sudo install -m 0600 -o root -g root /tmp/carplate-deploy-rotated.pub /root/carp
 rm -f /tmp/carplate-deploy-rotated.pub
 export MAINTENANCE_SHA="replace-with-reviewed-current-main-sha"
 printf '%s\n' "$MAINTENANCE_SHA" | grep -Ex '[0-9a-f]{40}'
+export MAINTENANCE_SOURCE="/srv/carplate-maintenance-source-${MAINTENANCE_SHA}"
+test "$(sudo -u carplate-build -H git -C "$MAINTENANCE_SOURCE" rev-parse HEAD)" = "$MAINTENANCE_SHA"
+sudo test -f "$MAINTENANCE_SOURCE/dist/src/scheduler/main.js"
+sudo test -d "$MAINTENANCE_SOURCE/node_modules"
 export ROTATION_REPOSITORY="/root/carplate-reviewed-${MAINTENANCE_SHA}.git"
 export ROTATION_REVIEWED_SOURCE="/root/carplate-reviewed-${MAINTENANCE_SHA}"
 sudo test ! -e "$ROTATION_REPOSITORY"
@@ -786,9 +794,10 @@ sudo env \
   CARPLATE_ENV_SOURCE=/root/carplate-bootstrap-rotation/app.env \
   CARPLATE_GOOGLE_JSON_SOURCE=/root/carplate-bootstrap-rotation/google-service-account.json \
   CARPLATE_AUTHORIZED_KEY_SOURCE=/root/carplate-bootstrap-rotation/deploy.pub \
-  CARPLATE_INITIAL_RELEASE_SOURCE="$CURRENT_CHECKOUT" \
+  CARPLATE_INITIAL_RELEASE_SOURCE="$MAINTENANCE_SOURCE" \
   CARPLATE_REVIEWED_SCRIPT_DIR="$ROTATION_REVIEWED_SOURCE/ops/deployment" \
   /usr/bin/bash "$ROTATION_REVIEWED_SOURCE/ops/deployment/bootstrap.sh"
+test "$(sudo cat /var/lib/naver-smartstore-car-plate-tracker/deployment/privileged-sha)" = "$MAINTENANCE_SHA"
 sudo sshd -t
 sudo visudo -cf /etc/sudoers.d/carplate-deploy
 sudo systemctl is-active car-plate-tracker.service
@@ -849,6 +858,7 @@ Useful distinctions:
 - `candidate_failed_restarted` points to dependency install, build, syntax, sealing, disk, memory, swap, timeout, or isolation validation before activation. Query `carplate-candidate-<diagnosticId>` as shown above; do not rely on a broad text grep because the opaque ID was not previously present in journal messages.
 - If the last stage is `candidate_tree_validation_failed`, inspect candidate metadata on Oracle. One known host-dependent cause was GNU tar preserving `0775` directory modes when root extracted `git archive`; the deployer now strips group/other write and special bits immediately after extraction and enforces `UMask=0022` for fetch/build units.
 - `activation_failed_rolled_back` points to service start or invocation health after `current` changed.
+- `privileged_maintenance_required` means the request was rejected before scheduler stop or candidate build. Check `privileged-sha`, freeze merges, and follow section 16; repeated dispatches cannot bypass this state.
 - `deployment_recovery_failed` means no release passed health and needs immediate maintenance.
 - `scheduled sync failed` is an application job failure. A successful scheduler process does not prove Naver, Google, DNS, or the network is healthy.
 

@@ -39,7 +39,9 @@ Use the [maintainer workstation recovery and handoff guide](operations/maintaine
 
 - GitHub Actions has `contents: read`; only the deploy job can access the `production` environment.
 - Pull requests never deploy, `workflow_dispatch` rejects non-`main` refs, and a failed `Verify` job blocks deployment.
-- Every `main` push is compared with its trusted predecessor. If `ops/deployment/` changed, the production job fails before SSH and requires an explicit reviewed privileged installation; `workflow_dispatch` is the post-maintenance retry path for the same verified `main` revision.
+- Every `main` push is compared with the last successful `main` production workflow revision as an early operator-facing gate. The workflow has read-only `actions` and `contents` access for this lookup and fails closed when it cannot establish that trusted revision. If the accumulated range changes `ops/deployment/`, the production job fails before SSH and requires an explicit reviewed privileged installation.
+- The server-side gate is authoritative and persistent across later pushes. Bootstrap binds every installed deployment script and systemd unit to the exact reviewed Git revision, then writes root-only `privileged-sha` only after the restarted scheduler passes readiness. Every forward deployment requires that marker to be an ancestor of the requested SHA with no `ops/deployment/` difference. A missing, malformed, stale, or mismatched marker returns `privileged_maintenance_required` before service stop or candidate build.
+- `workflow_dispatch` bypasses only the push-history classifier. It cannot bypass the server-side `privileged-sha` check and is accepted as the post-maintenance retry path only after bootstrap has recorded the exact reviewed `main` revision.
 - Reusable actions are pinned to full commit SHAs. `actionlint` and `shellcheck` are downloaded from their official versioned releases and accepted only after fixed SHA-256 verification. Dependabot proposes reviewed GitHub Actions pin updates.
 - Server deployment fetches only the compiled-in public HTTPS origin and activates only the exact current `origin/main` tip when it is a forward descendant of the durable deployed SHA. It refreshes the tip again immediately before writing activation state; an older request becomes `superseded` without activation.
 - Bootstrap rejects an initial checkout that equals or is nested inside `/opt/naver-smartstore-car-plate-tracker`; the source checkout, `.git`, `.env`, and Google key must remain outside the managed application tree.
@@ -47,7 +49,7 @@ Use the [maintainer workstation recovery and handoff guide](operations/maintaine
 - Equal and stale requests are successful no-ops. Divergent history, including a force-pushed `main`, fails closed.
 - Dependency download runs with lifecycle scripts disabled. Lifecycle scripts and the production build run only from the fetched lockfile cache, with no network, in a bounded cgroup with memory, swap, task, runtime, per-file, and private temporary-filesystem limits. The host filesystem still has no per-build aggregate project quota, so disk preflight and host disk monitoring remain required.
 - Activation rejects surviving descendants, inherited writable descriptors, escaping links, special files, unsafe ACLs or extended attributes, and mutable release content.
-- Bootstrap accepts privileged sources only when the complete path from `/` is root-owned and not group/other writable. Root copies validated candidate content into new root-owned inodes, creates a non-secret `release.env`, and retains only current and previous known-good releases.
+- Bootstrap accepts privileged sources only when the complete path from `/` is root-owned and not group/other writable. Every allowlisted reviewed deployment file must hash to the corresponding `ops/deployment/` blob in the exact initial-source Git revision. Root copies validated candidate content into new root-owned inodes, creates a non-secret `release.env`, and retains only current and previous known-good releases.
 
 ## Locks, shutdown, and crash recovery
 
@@ -82,5 +84,6 @@ Use the [automatic deployment runbook](operations/automatic-production-deploymen
 - Oracle host-key change: verify the new fingerprint through the Oracle console or another trusted path before replacing `OCI_DEPLOY_KNOWN_HOSTS`.
 - GitHub environment-secret exposure: rotate the affected key or host trust material and review Actions history and environment access.
 - `deployment_recovery_failed`: treat production as unavailable until the maintenance account confirms a healthy release, durable marker, current link, and new systemd invocation.
+- `privileged_maintenance_required`: keep the existing scheduler running, freeze further merges, install the exact reviewed privileged revision through bootstrap, verify `privileged-sha`, then rerun `workflow_dispatch` from `main`.
 
 Never repair deployment state by deleting `activation-state`, rewriting `deployed-sha`, or relinking `current` without a reviewed incident procedure that preserves the deployment lock and crash-consistency contract.
