@@ -4,6 +4,8 @@ This is the canonical, ordered migration and operations guide for the Oracle pro
 
 The currently open implementation pull request is **PR #2**. Do not use an older PR number when checking or merging this work.
 
+For a planned workstation replacement, unexpected Mac loss, or maintainer handoff, start with the shorter [maintainer workstation recovery and handoff guide](maintainer-workstation-recovery.md). It identifies which state is authoritative on GitHub or Oracle and prevents unnecessary credential copying or deploy-key replacement.
+
 ## Read this first
 
 - Replace every `replace-with-...` value locally. Never paste a real host, key, Naver credential, Google credential, spreadsheet ID, or environment file into Git, a PR, an issue, or a public Actions log.
@@ -822,5 +824,7 @@ Useful distinctions:
 ## 18. What survives a MacBook shutdown, and what does not
 
 After setup, the MacBook may be off. A merge or manual GitHub run executes on a GitHub-hosted runner, connects directly to Oracle with the forced key, and requests one SHA. On Oracle, `systemctl enable` starts the scheduler after VM reboot, the recovery oneshot reconciles interrupted activation first, and `Restart=on-failure` restarts a failed scheduler process.
+
+A replacement Mac does not need the GitHub Actions deployment private key, the Oracle runtime `.env`, or the Google service-account JSON. GitHub retains the environment secret for workflow use, while Oracle retains runtime credentials. The replacement workstation needs only personal GitHub access and a separately managed personal Oracle maintenance identity. Follow [Maintainer Workstation Recovery And Handoff](maintainer-workstation-recovery.md) before transferring, revoking, or rotating any key.
 
 These controls do not guarantee that the Oracle VM is powered on, GitHub can reach SSH, Naver or Google is available, credentials remain valid, the fixed IP remains allowed, disk space remains sufficient, or every scheduled sync succeeds. The 60-minute systemd stop timeout only allows an active sync to drain; after that timeout deployment fails. Continue monitoring Oracle, GitHub Actions, and the application journal, and use the separate [fixed-IP live smoke test](live-smoke-test.md) for real Naver and Google verification.

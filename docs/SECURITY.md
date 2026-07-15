@@ -29,8 +29,11 @@ The sudo rule is limited to the root deployer plus one lowercase SHA argument an
 - `.env`, service-account credentials, Naver secrets, deployment private keys, real store data, spreadsheet IDs, and exports must not be committed.
 - The dedicated GitHub deployment private key is not a personal OCI key and is scoped to the `production` environment.
 - `OCI_DEPLOY_KNOWN_HOSTS` must come from an independently verified server host fingerprint. Deployment uses strict host checking and never accepts a newly discovered host key.
+- Workstation continuity keeps personal GitHub and Oracle maintenance identities separate from GitHub Actions and Oracle runtime credentials. A replacement Mac does not receive the deploy private key, Naver secrets, the runtime environment, or the Google JSON merely for routine operation.
 
 GitHub receives only four production environment secrets: `OCI_DEPLOY_HOST`, `OCI_DEPLOY_USER`, `OCI_DEPLOY_SSH_PRIVATE_KEY`, and `OCI_DEPLOY_KNOWN_HOSTS`. Naver, Google, spreadsheet, and application environment values remain on Oracle.
+
+Use the [maintainer workstation recovery and handoff guide](operations/maintainer-workstation-recovery.md) for planned device replacement or unexpected loss. Establish replacement maintenance access before revoking an old key. If no trusted maintenance key remains, use an independently authorized OCI console recovery path; never repurpose the forced GitHub deploy identity as an interactive account.
 
 ## Deployment integrity
 
