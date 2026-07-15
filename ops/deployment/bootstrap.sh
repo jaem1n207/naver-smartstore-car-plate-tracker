@@ -59,6 +59,17 @@ else
   BOOTSTRAP_HEALTH_SECONDS=15
 fi
 readonly BOOTSTRAP_HEALTH_SECONDS
+readonly -a REVIEWED_DEPLOYMENT_PATHS=(
+  atomic_fs.py
+  bootstrap.sh
+  build-candidate.sh
+  deploy-entrypoint.sh
+  deploy.sh
+  recover.sh
+  lib/common.sh
+  systemd/car-plate-tracker.service
+  systemd/car-plate-tracker-recover.service
+)
 
 die() {
   printf '%s\n' "$*" >&2
@@ -255,16 +266,34 @@ write_managed_file() {
 
 validate_reviewed_sources() {
   local relative
-  for relative in deploy-entrypoint.sh deploy.sh recover.sh build-candidate.sh lib/common.sh atomic_fs.py; do
+  for relative in "${REVIEWED_DEPLOYMENT_PATHS[@]}"; do
     require_regular_source "${REVIEWED_SCRIPT_DIRECTORY}/${relative}" ||
       die "missing reviewed deployment source: ${relative}"
   done
 
-  for relative in deploy-entrypoint.sh deploy.sh recover.sh build-candidate.sh lib/common.sh; do
+  for relative in bootstrap.sh deploy-entrypoint.sh deploy.sh recover.sh build-candidate.sh lib/common.sh; do
     bash -n "${REVIEWED_SCRIPT_DIRECTORY}/${relative}"
   done
   python3 -c 'import ast,pathlib,sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' \
     "${REVIEWED_SCRIPT_DIRECTORY}/atomic_fs.py"
+}
+
+validate_reviewed_source_revision() {
+  [[ $# -eq 1 ]] || return 1
+  local revision=$1
+  local relative
+  local actual_blob
+  local expected_blob
+
+  [[ $revision =~ ^[0-9a-f]{40}$ ]] || return 1
+  for relative in "${REVIEWED_DEPLOYMENT_PATHS[@]}"; do
+    actual_blob=$(git hash-object -- "${REVIEWED_SCRIPT_DIRECTORY}/${relative}" 2>/dev/null) ||
+      return 1
+    expected_blob=$(git -c "safe.directory=$INITIAL_RELEASE_SOURCE" \
+      -C "$INITIAL_RELEASE_SOURCE" rev-parse --verify \
+      "${revision}:ops/deployment/${relative}" 2>/dev/null) || return 1
+    [[ $actual_blob =~ ^[0-9a-f]{40}$ && $actual_blob == "$expected_blob" ]] || return 1
+  done
 }
 
 install_reviewed_scripts() {
@@ -370,9 +399,9 @@ ${CARPLATE_DEPLOY_USER} ALL=(root) NOPASSWD: NOSETENV: ${DEPLOYER} ^[0-9a-f]{40}
 
 install_systemd_units() {
   install -d -m 0755 -o root -g root "$SYSTEMD_DIRECTORY"
-  install_file "${DEPLOYMENT_DIRECTORY}/systemd/car-plate-tracker.service" \
+  install_file "${REVIEWED_SCRIPT_DIRECTORY}/systemd/car-plate-tracker.service" \
     "${SYSTEMD_DIRECTORY}/car-plate-tracker.service" 0644 root
-  install_file "${DEPLOYMENT_DIRECTORY}/systemd/car-plate-tracker-recover.service" \
+  install_file "${REVIEWED_SCRIPT_DIRECTORY}/systemd/car-plate-tracker-recover.service" \
     "${SYSTEMD_DIRECTORY}/car-plate-tracker-recover.service" 0644 root
   systemctl daemon-reload
 }
@@ -506,6 +535,28 @@ if sys.argv[2] != "1" and (metadata.st_uid != 0 or metadata.st_gid != 0):
   printf '%s\n' "$sha"
 }
 
+read_privileged_sha() {
+  local marker="${DEPLOYMENT_STATE_DIRECTORY}/privileged-sha"
+  local sha
+
+  [[ -f $marker && ! -L $marker ]] || return 1
+  IFS= read -r sha <"$marker" || return 1
+  [[ $sha =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ $(wc -c <"$marker") -eq 41 ]] || return 1
+  python3 -c '
+import os
+import stat
+import sys
+
+metadata = os.lstat(sys.argv[1])
+if stat.S_IMODE(metadata.st_mode) != 0o600:
+    raise SystemExit(1)
+if sys.argv[2] != "1" and (metadata.st_uid != 0 or metadata.st_gid != 0):
+    raise SystemExit(1)
+' "$marker" "${CARPLATE_TEST_MODE:-0}" || return 1
+  printf '%s\n' "$sha"
+}
+
 read_current_sha() {
   local target
   [[ -L ${APP_ROOT}/current ]] || return 1
@@ -591,6 +642,12 @@ write_deployed_sha_atomically() {
     --allowed-root "$STATE_ROOT" write-file "${DEPLOYMENT_STATE_DIRECTORY}/deployed-sha" 0600
 }
 
+write_privileged_sha_atomically() {
+  local sha=$1
+  printf '%s\n' "$sha" | python3 "${SCRIPT_DIRECTORY}/atomic_fs.py" \
+    --allowed-root "$STATE_ROOT" write-file "${DEPLOYMENT_STATE_DIRECTORY}/privileged-sha" 0600
+}
+
 verify_known_good_baseline() {
   local sha=$1
   local current_sha
@@ -640,6 +697,7 @@ establish_initial_known_good_release() {
 main() {
   local previous_invocation=
   local current_invocation
+  local reviewed_revision
   local service_was_active=0
 
   require_absolute_path "$APP_ROOT" || die 'CARPLATE_APP_ROOT must be an absolute normalized path'
@@ -655,6 +713,11 @@ main() {
   require_absolute_path "$SUDOERS_FILE" || die 'CARPLATE_SUDOERS_FILE must be an absolute normalized path'
   validate_bootstrap_source_boundaries
   validate_reviewed_source_boundary
+  validate_initial_source
+  reviewed_revision=$(initial_source_sha) ||
+    die 'initial release Git HEAD must be a 40-character lowercase SHA'
+  validate_reviewed_source_revision "$reviewed_revision" ||
+    die 'reviewed deployment source does not match initial Git revision'
 
   if systemctl is-active --quiet "$RUNTIME_SERVICE"; then
     service_was_active=1
@@ -725,6 +788,10 @@ main() {
     ((elapsed += 1))
   done
   [[ $startup_record_seen -eq 1 ]] || die 'scheduler startup readiness record was not observed'
+  write_privileged_sha_atomically "$reviewed_revision" ||
+    die 'cannot record the reviewed privileged deployment revision'
+  [[ $(read_privileged_sha) == "$reviewed_revision" ]] ||
+    die 'reviewed privileged deployment revision verification failed'
 }
 
 main "$@"
