@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
@@ -28,6 +29,7 @@ const expectedSecrets = new Set([
 
 const stepSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
+  id: z.string().optional(),
   if: z.string().optional(),
   name: z.string().optional(),
   run: z.string().optional(),
@@ -45,6 +47,7 @@ const jobSchema = z.object({
   environment: z.union([z.string(), z.object({ name: z.string() })]).optional(),
   if: z.string().optional(),
   needs: z.union([z.string(), z.array(z.string())]).optional(),
+  outputs: z.record(z.string(), z.string()).optional(),
   permissions: z.record(z.string(), z.string()).optional(),
   "runs-on": z.string(),
   steps: z.array(stepSchema),
@@ -116,6 +119,46 @@ async function checkShellSyntax(script: string) {
   });
 }
 
+async function runCommand(
+  command: string,
+  args: string[],
+  options: { cwd: string; env?: NodeJS.ProcessEnv; stdin?: string },
+) {
+  return await new Promise<{ code: number | null; stderr: string; stdout: string }>(
+    (resolveRun, rejectRun) => {
+      const child = spawn(command, args, {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let stderr = "";
+      let stdout = "";
+
+      child.stderr.setEncoding("utf8");
+      child.stdout.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+      child.stdout.on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.on("error", rejectRun);
+      child.on("close", (code) => {
+        resolveRun({ code, stderr, stdout });
+      });
+      child.stdin.end(options.stdin);
+    },
+  );
+}
+
+async function runGit(cwd: string, args: string[]) {
+  const result = await runCommand("git", args, { cwd });
+  if (result.code !== 0) {
+    throw new Error(result.stderr);
+  }
+  return result.stdout.trim();
+}
+
 describe("production deployment workflow", () => {
   it("verifies pull requests and deploys only verified main revisions", async () => {
     const { workflow } = await readWorkflow();
@@ -137,12 +180,152 @@ describe("production deployment workflow", () => {
     expect(dispatchGuard.run).toMatch(/(?:^|\n)\s*exit 1\s*(?:\n|$)/u);
   });
 
+  it("fails closed before SSH when a main push changes privileged deployment assets", async () => {
+    const { workflow } = await readWorkflow();
+    const verify = getJob(workflow, "verify");
+    const deploy = getJob(workflow, "deploy");
+    const checkout = verify.steps.find((step) => step.uses?.startsWith("actions/checkout@"));
+    const classifier = getStep(verify, "Classify privileged deployment changes");
+    const maintenanceGate = getStep(deploy, "Require reviewed privileged maintenance");
+    const request = getStep(deploy, "Request production deployment");
+
+    expect(checkout?.with).toMatchObject({ "fetch-depth": 2 });
+    expect(verify.outputs).toEqual({
+      privileged_maintenance_required:
+        "${{ steps.deployment_scope.outputs.privileged_maintenance_required }}",
+    });
+    expect(classifier.id).toBe("deployment_scope");
+    expect(classifier.env).toEqual({
+      CURRENT_SHA: "${{ github.sha }}",
+      EVENT_NAME: "${{ github.event_name }}",
+      GH_REPOSITORY: "${{ github.repository }}",
+      GH_TOKEN: "${{ github.token }}",
+    });
+    expect(classifier.run).toContain('[[ "${EVENT_NAME}" == push ]]');
+    expect(classifier.run).toContain("actions/workflows/deploy-production.yml/runs");
+    expect(classifier.run).toContain("trusted_production_sha");
+    expect(classifier.run).toContain(
+      'git diff --quiet "${trusted_production_sha}" "${CURRENT_SHA}" -- ops/deployment',
+    );
+    expect(classifier.run).toContain("privileged_maintenance_required=true");
+    expect(classifier.run).toContain('>>"${GITHUB_OUTPUT}"');
+
+    expect(compactExpression(maintenanceGate.if)).toBe(
+      "github.event_name == 'push' && needs.verify.outputs.privileged_maintenance_required == 'true'",
+    );
+    expect(maintenanceGate.run).toContain("Privileged maintenance required");
+    expect(maintenanceGate.run).toContain("workflow_dispatch");
+    expect(maintenanceGate.run).toMatch(/(?:^|\n)\s*exit 1\s*(?:\n|$)/u);
+    expect(deploy.steps.indexOf(maintenanceGate)).toBeLessThan(deploy.steps.indexOf(request));
+
+    const classifierSyntax = await checkShellSyntax(classifier.run ?? "");
+    expect(classifierSyntax.code, classifierSyntax.stderr).toBe(0);
+    const gateSyntax = await checkShellSyntax(maintenanceGate.run ?? "");
+    expect(gateSyntax.code, gateSyntax.stderr).toBe(0);
+  });
+
+  it("classifies application changes separately from privileged deployment changes", async () => {
+    const { workflow } = await readWorkflow();
+    const classifier = getStep(
+      getJob(workflow, "verify"),
+      "Classify privileged deployment changes",
+    );
+    const fixture = await mkdtemp(join(tmpdir(), "carplate-deployment-scope-"));
+
+    try {
+      await runGit(fixture, ["init", "--quiet"]);
+      await runGit(fixture, ["config", "user.name", "Deployment Scope Test"]);
+      await runGit(fixture, ["config", "user.email", "deployment-scope@example.invalid"]);
+      await mkdir(join(fixture, "src"));
+      await writeFile(join(fixture, "src/application.ts"), "export const version = 1;\n", "utf8");
+      await runGit(fixture, ["add", "."]);
+      await runGit(fixture, ["commit", "--quiet", "-m", "initial"]);
+      const initialSha = await runGit(fixture, ["rev-parse", "HEAD"]);
+      const shimDirectory = join(fixture, "bin");
+      const ghShim = join(shimDirectory, "gh");
+      await mkdir(shimDirectory);
+      await writeFile(
+        ghShim,
+        '#!/bin/sh\nprintf \'{"workflow_runs":[{"event":"push","head_sha":"%s"}]}\\n\' "${TRUSTED_PRODUCTION_SHA}"\n',
+      );
+      await chmod(ghShim, 0o700);
+      const classifierEnvironment = {
+        ...process.env,
+        EVENT_NAME: "push",
+        GH_REPOSITORY: "example/repository",
+        GH_TOKEN: "test-token",
+        PATH: `${shimDirectory}:${process.env.PATH ?? ""}`,
+        TRUSTED_PRODUCTION_SHA: initialSha,
+      };
+
+      await writeFile(join(fixture, "src/application.ts"), "export const version = 2;\n", "utf8");
+      await runGit(fixture, ["add", "."]);
+      await runGit(fixture, ["commit", "--quiet", "-m", "application"]);
+      const applicationSha = await runGit(fixture, ["rev-parse", "HEAD"]);
+      const applicationOutput = join(fixture, "application-output");
+      const applicationResult = await runCommand("bash", ["-c", classifier.run ?? ""], {
+        cwd: fixture,
+        env: {
+          ...classifierEnvironment,
+          CURRENT_SHA: applicationSha,
+          GITHUB_OUTPUT: applicationOutput,
+        },
+      });
+
+      expect(applicationResult.code, applicationResult.stderr).toBe(0);
+      await expect(readFile(applicationOutput, "utf8")).resolves.toBe(
+        "privileged_maintenance_required=false\n",
+      );
+
+      await mkdir(join(fixture, "ops/deployment"), { recursive: true });
+      await writeFile(join(fixture, "ops/deployment/deploy.sh"), "#!/usr/bin/env bash\n", "utf8");
+      await runGit(fixture, ["add", "."]);
+      await runGit(fixture, ["commit", "--quiet", "-m", "privileged"]);
+      const privilegedSha = await runGit(fixture, ["rev-parse", "HEAD"]);
+      const privilegedOutput = join(fixture, "privileged-output");
+      const privilegedResult = await runCommand("bash", ["-c", classifier.run ?? ""], {
+        cwd: fixture,
+        env: {
+          ...classifierEnvironment,
+          CURRENT_SHA: privilegedSha,
+          GITHUB_OUTPUT: privilegedOutput,
+        },
+      });
+
+      expect(privilegedResult.code, privilegedResult.stderr).toBe(0);
+      await expect(readFile(privilegedOutput, "utf8")).resolves.toBe(
+        "privileged_maintenance_required=true\n",
+      );
+
+      await writeFile(join(fixture, "src/application.ts"), "export const version = 3;\n", "utf8");
+      await runGit(fixture, ["add", "."]);
+      await runGit(fixture, ["commit", "--quiet", "-m", "application follow-up"]);
+      const followUpSha = await runGit(fixture, ["rev-parse", "HEAD"]);
+      const followUpOutput = join(fixture, "follow-up-output");
+      const followUpResult = await runCommand("bash", ["-c", classifier.run ?? ""], {
+        cwd: fixture,
+        env: {
+          ...classifierEnvironment,
+          CURRENT_SHA: followUpSha,
+          GITHUB_OUTPUT: followUpOutput,
+        },
+      });
+
+      expect(followUpResult.code, followUpResult.stderr).toBe(0);
+      await expect(readFile(followUpOutput, "utf8")).resolves.toBe(
+        "privileged_maintenance_required=true\n",
+      );
+    } finally {
+      await rm(fixture, { force: true, recursive: true });
+    }
+  });
+
   it("keeps repository access read-only and serializes only production deployment", async () => {
     const { workflow } = await readWorkflow();
     const verify = getJob(workflow, "verify");
     const deploy = getJob(workflow, "deploy");
 
-    expect(workflow.permissions).toEqual({ contents: "read" });
+    expect(workflow.permissions).toEqual({ actions: "read", contents: "read" });
     expect(verify.permissions).toBeUndefined();
     expect(deploy.permissions).toBeUndefined();
     expect(verify.environment).toBeUndefined();
@@ -260,6 +443,15 @@ describe("production deployment workflow", () => {
     expect(request.run).toContain(
       "{outcome, requestedSha, previousSha, activatedSha, diagnosticId}",
     );
+    expect(request.run).toContain(
+      'deployment_outcome="$(jq -r .outcome <<<"${sanitized_result}")"',
+    );
+    expect(request.run).toContain(
+      '[[ "${deployment_outcome}" == privileged_maintenance_required ]]',
+    );
+    expect(request.run).toContain("Privileged maintenance required");
+    expect(request.run).toContain('>>"${GITHUB_STEP_SUMMARY}"');
+    expect(request.run).not.toContain("`");
     expect(request.run).toContain(`printf '%s\\n' "\${sanitized_result}"`);
     expect(request.run).not.toMatch(/StrictHostKeyChecking=(?:no|accept-new)/u);
     expect(request.run).not.toMatch(/(?:journalctl|printenv|set -x|ssh -v)/u);

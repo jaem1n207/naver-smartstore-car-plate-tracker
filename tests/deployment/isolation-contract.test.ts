@@ -13,12 +13,23 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const bootstrapScript = join(repositoryRoot, "ops/deployment/bootstrap.sh");
 const systemdDirectory = join(repositoryRoot, "ops/deployment/systemd");
+const reviewedDeploymentPaths = [
+  "atomic_fs.py",
+  "bootstrap.sh",
+  "build-candidate.sh",
+  "deploy-entrypoint.sh",
+  "deploy.sh",
+  "recover.sh",
+  "lib/common.sh",
+  "systemd/car-plate-tracker.service",
+  "systemd/car-plate-tracker-recover.service",
+];
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -290,6 +301,38 @@ describe("deployment isolation contract", () => {
     );
   }, 15_000);
 
+  it("binds installed privileged assets to the exact reviewed Git revision", async () => {
+    const fixture = await createBootstrapFixture();
+    const marker = join(fixture.stateRoot, "deployment", "privileged-sha");
+
+    const first = await runBootstrap(fixture);
+
+    expect(first.code, first.stderr).toBe(0);
+    await expect(readFile(marker, "ascii")).resolves.toBe(`${fixture.initialRevision}\n`);
+    expect((await stat(marker)).mode & 0o777).toBe(0o600);
+
+    const second = await runBootstrap(fixture);
+
+    expect(second.code, second.stderr).toBe(0);
+    await expect(readFile(marker, "ascii")).resolves.toBe(`${fixture.initialRevision}\n`);
+  }, 15_000);
+
+  it("rejects a reviewed deployment source that differs from the initial Git revision", async () => {
+    const fixture = await createBootstrapFixture();
+    await writeFile(
+      join(fixture.reviewedScriptDirectory, "deploy.sh"),
+      "#!/usr/bin/env bash\nset -Eeuo pipefail\nprintf 'tampered\\n'\n",
+    );
+
+    const result = await runBootstrap(fixture);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(
+      "reviewed deployment source does not match initial Git revision",
+    );
+    expect(await pathExists(join(fixture.stateRoot, "deployment", "privileged-sha"))).toBe(false);
+  }, 15_000);
+
   it("seals a secretless initial release before enabling the scheduler and preserves it on repeat", async () => {
     const fixture = await createBootstrapFixture();
     const temporaryRelease = join(
@@ -504,8 +547,11 @@ async function createBootstrapFixture(
   ]);
   await chmod(environmentSource, 0o600);
   await chmod(googleSource, 0o600);
-  const initialRevision = await writeInitialReleaseSource(initialReleaseSource);
   await writeReviewedScripts(reviewedScriptDirectory);
+  const initialRevision = await writeInitialReleaseSource(
+    initialReleaseSource,
+    reviewedScriptDirectory,
+  );
   await writeCommandShims(shimDirectory, commandLog, accountStateDirectory);
 
   return {
@@ -533,29 +579,30 @@ async function createBootstrapFixture(
 }
 
 async function writeReviewedScripts(directory: string): Promise<void> {
-  const shellScript = "#!/usr/bin/env bash\nset -Eeuo pipefail\nexit 0\n";
-  await Promise.all([
-    writeFile(join(directory, "deploy-entrypoint.sh"), shellScript, { mode: 0o700 }),
-    writeFile(join(directory, "deploy.sh"), shellScript, { mode: 0o700 }),
-    writeFile(join(directory, "recover.sh"), shellScript, { mode: 0o700 }),
-    writeFile(join(directory, "build-candidate.sh"), shellScript, { mode: 0o700 }),
-    copyFile(
-      join(repositoryRoot, "ops/deployment/lib/common.sh"),
-      join(directory, "lib", "common.sh"),
-    ),
-    copyFile(join(repositoryRoot, "ops/deployment/atomic_fs.py"), join(directory, "atomic_fs.py")),
-  ]);
+  await copyReviewedDeploymentTree(join(repositoryRoot, "ops/deployment"), directory);
   await Promise.all([
     chmod(join(directory, "lib", "common.sh"), 0o600),
     chmod(join(directory, "atomic_fs.py"), 0o600),
   ]);
 }
 
-async function writeInitialReleaseSource(directory: string): Promise<string> {
+async function copyReviewedDeploymentTree(source: string, destination: string): Promise<void> {
+  for (const relativePath of reviewedDeploymentPaths) {
+    const destinationPath = join(destination, relativePath);
+    await mkdir(dirname(destinationPath), { recursive: true, mode: 0o700 });
+    await copyFile(join(source, relativePath), destinationPath);
+  }
+}
+
+async function writeInitialReleaseSource(
+  directory: string,
+  reviewedScriptDirectory: string,
+): Promise<string> {
   await Promise.all([
     mkdir(join(directory, "dist/src/scheduler"), { recursive: true }),
     mkdir(join(directory, "node_modules"), { recursive: true }),
   ]);
+  await copyReviewedDeploymentTree(reviewedScriptDirectory, join(directory, "ops/deployment"));
   await Promise.all([
     writeFile(
       join(directory, "package.json"),
@@ -573,7 +620,7 @@ async function writeInitialReleaseSource(directory: string): Promise<string> {
     ["init", "--quiet"],
     ["config", "user.name", "Bootstrap Test"],
     ["config", "user.email", "bootstrap@example.test"],
-    ["add", "package.json", "dist/src/scheduler/main.js", "pnpm-lock.yaml"],
+    ["add", "package.json", "dist/src/scheduler/main.js", "pnpm-lock.yaml", "ops/deployment"],
     ["commit", "--quiet", "-m", "initial built checkout"],
   ]) {
     const result = await runProcess("git", ["-C", directory, ...arguments_], process.env);
