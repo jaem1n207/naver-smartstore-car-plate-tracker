@@ -44,6 +44,8 @@ Production uses a fixed-IP Oracle VM, Node.js `22.23.1`, pnpm `11.10.0`, immutab
 
 Follow the ordered [automatic production deployment runbook](docs/operations/automatic-production-deployment.md) for backup, moving the existing `/opt` checkout to `/srv/carplate-bootstrap-source`, persistent 2 GiB swap, exact runtime installation, the initial built checkout, dedicated users, secret migration, forced deploy key, GitHub `production` environment, branch protection, first deployment, reboot verification, rollback drill, rotation, and diagnostics. The currently open deployment PR is **#2**.
 
+Use the [maintainer workstation recovery and handoff guide](docs/operations/maintainer-workstation-recovery.md) when replacing or losing the maintainer Mac. It records the current migration checkpoint, authoritative state locations, off-repository continuity inventory, planned key handoff, and break-glass recovery boundary without storing real credentials.
+
 PR #2 must be merged with **Create a merge commit**, not squash merge or rebase merge. Bootstrap records the PR head as the initial deployed SHA, and the monotonic deployer requires the new `main` revision to be its descendant.
 
 After the one-time privileged bootstrap, merging a verified PR into `main` is the normal deployment. GitHub-hosted runners build and connect directly to Oracle, so the developer's MacBook may be off. Routine `main` deployments do not update root-owned deployment scripts, systemd units, SSH policy, sudoers, or `/etc` secrets; those changes require an explicit reviewed bootstrap-maintenance operation.
