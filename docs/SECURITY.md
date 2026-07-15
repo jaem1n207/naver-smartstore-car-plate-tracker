@@ -39,6 +39,7 @@ Use the [maintainer workstation recovery and handoff guide](operations/maintaine
 
 - GitHub Actions has `contents: read`; only the deploy job can access the `production` environment.
 - Pull requests never deploy, `workflow_dispatch` rejects non-`main` refs, and a failed `Verify` job blocks deployment.
+- Every `main` push is compared with its trusted predecessor. If `ops/deployment/` changed, the production job fails before SSH and requires an explicit reviewed privileged installation; `workflow_dispatch` is the post-maintenance retry path for the same verified `main` revision.
 - Reusable actions are pinned to full commit SHAs. `actionlint` and `shellcheck` are downloaded from their official versioned releases and accepted only after fixed SHA-256 verification. Dependabot proposes reviewed GitHub Actions pin updates.
 - Server deployment fetches only the compiled-in public HTTPS origin and activates only the exact current `origin/main` tip when it is a forward descendant of the durable deployed SHA. It refreshes the tip again immediately before writing activation state; an older request becomes `superseded` without activation.
 - Bootstrap rejects an initial checkout that equals or is nested inside `/opt/naver-smartstore-car-plate-tracker`; the source checkout, `.git`, `.env`, and Google key must remain outside the managed application tree.

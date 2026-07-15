@@ -723,6 +723,20 @@ The CLI and scheduler both acquire `/var/lib/naver-smartstore-car-plate-tracker/
 
 Routine `main` deployments never install changed files from `ops/deployment/`. Any change to deployment scripts, systemd units, SSH restrictions, sudoers, or production secrets requires a reviewed maintenance window and an explicit bootstrap rerun.
 
+The production workflow classifies every `main` push before opening an SSH connection. When the pushed revision changes `ops/deployment/`, `Verify` still validates the repository, but `Deploy production` stops at **Require reviewed privileged maintenance** with a deliberate failure. This is not a candidate-build failure: the root-owned deployer has not been updated yet, and allowing that deployer to replace itself would violate the privileged trust boundary.
+
+Use this order for a privileged-only change:
+
+1. Confirm that `Verify` passed for the merged `main` SHA and that the deployment gate reports `Privileged maintenance required`.
+2. Freeze additional merges and record the exact 40-character `main` SHA.
+3. Preserve the current protected environment, Google credential, deployment public key, and installed privileged assets in a root-only backup.
+4. Fetch that exact SHA into a new root-only bare repository, export only `ops/deployment/`, and make the exported tree root-owned and non-writable as shown below.
+5. Run `bootstrap.sh` from that immutable reviewed source. A maintenance rerun validates the existing known-good release, installs the reviewed privileged files, and requires a new healthy scheduler invocation.
+6. In GitHub Actions, run **Production Deployment** with `workflow_dispatch` on `main`. Manual dispatch intentionally bypasses the push-diff gate because the operator has completed the privileged installation.
+7. Verify `outcome: deployed`, then confirm `deployed-sha`, `current`, the scheduler startup revision, zero unexpected restarts, and an absent `activation-state` file.
+
+Do not repeatedly rerun a gated push before step 5. The same old root-owned deployer will continue to run, so a source-only fix to `ops/deployment/` cannot repair its own production installation.
+
 For key rotation, first generate a second dedicated key and transfer only its public half.
 
 **[MacBook]**
