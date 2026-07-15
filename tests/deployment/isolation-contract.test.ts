@@ -31,6 +31,12 @@ afterEach(async () => {
 });
 
 describe("deployment isolation contract", () => {
+  it("allows 15 seconds for the production scheduler readiness record", async () => {
+    const source = await readFile(bootstrapScript, "utf8");
+
+    expect(source).toContain("BOOTSTRAP_HEALTH_SECONDS=15");
+  });
+
   it("creates a trusted bootstrap fixture under a group-writable caller umask", async () => {
     const previousUmask = process.umask(0o002);
     const fixture = await createBootstrapFixture().finally(() => {
