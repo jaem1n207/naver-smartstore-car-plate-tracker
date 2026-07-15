@@ -14,7 +14,7 @@
 ## Account separation
 
 - `carplate` runs compiled production JavaScript. It can read `app.env` and the Google key and can write only `/var/lib/naver-smartstore-car-plate-tracker/runtime`.
-- `carplate-build` fetches registry packages with lifecycle scripts disabled and private, loopback, and link-local destinations denied, then installs and builds offline in a private-network transient systemd unit. It cannot read production credentials and has no sudo permission.
+- `carplate-build` fetches registry packages with lifecycle scripts disabled and private, loopback, and link-local destinations denied, then installs and builds offline in a private-network transient systemd unit. Candidate archive entries have group/other write and special permission bits removed before the build, and both transient units enforce `UMask=0022`. The account cannot read production credentials and has no sudo permission.
 - `carplate-deploy` has a locked password and a shell only because OpenSSH must invoke the forced command. Both the account policy and the authorized-key line force the same entrypoint; root-owned SSH restrictions disable caller-selected commands, TTY, forwarding, user rc, alternate authorized-key commands or user CAs, and password or keyboard-interactive authentication.
 - The personal Oracle maintenance account remains separate from all three service accounts and keeps the only general incident-recovery path.
 - Root owns the bare Git mirror, immutable releases, symlinks, deploy state, forced-command programs, systemd units, authorized key, SSH drop-in, and sudoers rule.
@@ -59,7 +59,7 @@ Use the [maintainer workstation recovery and handoff guide](operations/maintaine
 
 ## Public log policy
 
-The GitHub workflow accepts and prints only these deployment result fields: outcome, requested SHA, previous SHA, activated SHA, and an opaque diagnostic ID. The SSH entrypoint rejects extra keys, malformed output, multiple lines, non-ASCII content, and mismatched requested SHA.
+The GitHub workflow accepts and prints only these deployment result fields: outcome, requested SHA, previous SHA, activated SHA, and an opaque diagnostic ID. Candidate fetch and build units use that ID only as a server-side syslog identifier so an operator can select the matching Oracle journal without exposing it publicly. The deployer records only fixed candidate stage names under the same identifier; paths, package output, and failure details remain server-side. The SSH entrypoint rejects extra keys, malformed output, multiple lines, non-ASCII content, and mismatched requested SHA.
 
 Application journals, environment values, filesystem paths, store names, product counts, command environments, Naver errors, and credential-bearing URLs stay on Oracle. Do not add `journalctl`, shell tracing, environment dumps, or verbose SSH output to public workflow steps.
 
