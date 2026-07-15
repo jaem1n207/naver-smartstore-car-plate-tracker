@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -33,22 +34,50 @@ jobs:
       - name: Classify privileged deployment changes
         id: deployment_scope
         env:
-          BEFORE_SHA: ${{ github.event.before }}
           CURRENT_SHA: ${{ github.sha }}
           EVENT_NAME: ${{ github.event_name }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           privileged_maintenance_required=false
 
           if [[ "${EVENT_NAME}" == push ]]; then
-            if [[ ! "${BEFORE_SHA}" =~ ^[0-9a-f]{40}$ || "${BEFORE_SHA}" =~ ^0{40}$ || ! "${CURRENT_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error::Cannot establish the trusted main revision range."
+            if [[ ! "${CURRENT_SHA}" =~ ^[0-9a-f]{40}$ || ! "${GH_REPOSITORY}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ || -z "${GH_TOKEN}" ]]; then
+              echo "::error::Cannot establish the trusted production revision."
               exit 1
             fi
-            if ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-              git fetch --no-tags --depth=1 origin "${BEFORE_SHA}"
+
+            if ! successful_runs="$(
+              gh api --method GET \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "/repos/${GH_REPOSITORY}/actions/workflows/deploy-production.yml/runs?status=success&branch=main&per_page=100"
+            )"; then
+              echo "::error::Cannot read the last successful production deployment."
+              exit 1
             fi
-            if ! git diff --quiet "${BEFORE_SHA}" "${CURRENT_SHA}" -- ops/deployment; then
+
+            if ! trusted_production_sha="$(
+              jq -er '
+                [.workflow_runs[]
+                  | select(.event == "push" or .event == "workflow_dispatch")
+                  | .head_sha]
+                | first
+                | select(type == "string")
+              ' <<<"${successful_runs}"
+            )" || [[ ! "${trusted_production_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Cannot identify the last successful production revision."
+              exit 1
+            fi
+
+            if ! git cat-file -e "${trusted_production_sha}^{commit}" 2>/dev/null; then
+              if ! git fetch --no-tags --depth=1 origin "${trusted_production_sha}"; then
+                echo "::error::Cannot fetch the last successful production revision."
+                exit 1
+              fi
+            fi
+            if ! git diff --quiet "${trusted_production_sha}" "${CURRENT_SHA}" -- ops/deployment; then
               privileged_maintenance_required=true
             fi
           fi
@@ -224,6 +253,19 @@ jobs:
           )"; then
             echo "::error::Deployment returned an invalid response."
             exit 1
+          fi
+
+          deployment_outcome="$(jq -r .outcome <<<"${sanitized_result}")"
+          if [[ "${deployment_outcome}" == privileged_maintenance_required ]]; then
+            status=1
+            echo "::error title=Privileged maintenance required::The reviewed root-owned deployment assets do not match this main revision. Run the documented Oracle privileged maintenance procedure for this exact SHA, then dispatch this workflow again from main."
+            {
+              echo "## Privileged maintenance required"
+              echo
+              echo "The Oracle server rejected deployment before stopping the scheduler or building a candidate."
+              echo "Its reviewed root-owned deployment assets do not match commit `${GITHUB_SHA}`."
+              echo "Run the documented privileged maintenance procedure for this exact SHA, then rerun this workflow from `main` with `workflow_dispatch`."
+            } >>"${GITHUB_STEP_SUMMARY}"
           fi
 
           printf '%s\n' "${sanitized_result}"
