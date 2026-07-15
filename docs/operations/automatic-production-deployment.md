@@ -288,7 +288,9 @@ sudo chown -R root:root "$REVIEWED_SOURCE"
 sudo find "$REVIEWED_SOURCE" -type d -exec chmod 0555 -- {} +
 sudo find "$REVIEWED_SOURCE" -type f -exec chmod 0444 -- {} +
 test -z "$(sudo find "$REVIEWED_SOURCE" \( ! -user root -o -perm /022 -o -type l \) -print -quit)"
-sudo bash -n "$REVIEWED_SOURCE"/ops/deployment/*.sh "$REVIEWED_SOURCE"/ops/deployment/lib/*.sh
+sudo find "$REVIEWED_SOURCE/ops/deployment" -type f -name '*.sh' -exec bash -n -- {} +
+sudo test -f "$REVIEWED_SOURCE/ops/deployment/bootstrap.sh"
+sudo test -f "$REVIEWED_SOURCE/ops/deployment/lib/common.sh"
 ```
 
 ## 7. Create the dedicated deploy key
@@ -379,7 +381,7 @@ sudo env \
 
 Bootstrap is repeat-safe only when existing markers, links, releases, accounts, and source files still satisfy the validated contract. It fails closed on disagreement. Do not delete state merely to make a rerun pass.
 
-On a maintenance rerun, bootstrap records the active scheduler `InvocationID`, installs the reviewed privileged files, explicitly restarts the service, and refuses success unless a different invocation remains active with the same restart count for the bounded five-second bootstrap health window. `enable --now` alone is not treated as proof that an already-running process loaded the new installation.
+On a maintenance rerun, bootstrap records the active scheduler `InvocationID`, installs the reviewed privileged files, explicitly restarts the service, and refuses success unless a different invocation remains active with the same restart count for the bounded 15-second bootstrap health window. The window allows a cold Node.js process on the free-tier VM to publish its structured startup record without weakening the invocation or restart checks. `enable --now` alone is not treated as proof that an already-running process loaded the new installation.
 
 Verify users, ownership, installed policy, the initial release, and the compiled service without displaying secrets.
 

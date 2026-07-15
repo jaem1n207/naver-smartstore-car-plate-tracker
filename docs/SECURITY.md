@@ -52,7 +52,7 @@ GitHub receives only four production environment secrets: `OCI_DEPLOY_HOST`, `OC
 - Lock ownership includes PID, Linux process start ticks, and a random token. An entirely empty lock directory left before owner publication is reclaimable only after 60 seconds; active, fresh, malformed, or unexpected state fails closed. Operators must not delete locks by hand.
 - Before changing `current`, deployment fsyncs a root-only pending activation state containing the candidate, current known-good release, and the older `previous` release. A failed A/B/C activation restores both known-good links. It commits `deployed-sha` only after invocation-scoped health succeeds, clears the pending journal before pruning, and therefore never removes a release still required by durable recovery state.
 - `car-plate-tracker-recover.service` runs before the scheduler on every boot. Pending activation or marker/link disagreement restores the durable known-good release before credentials are read by the runtime.
-- Deployment health requires a new systemd invocation, `scheduler started`, `mode: live`, expected cron, expected `APP_REVISION`, stable PID, unchanged restart count, and 15 seconds of `active/running` state. Bootstrap applies the same startup-record contract and a bounded five-second stable invocation/restart check.
+- Deployment health requires a new systemd invocation, `scheduler started`, `mode: live`, expected cron, expected `APP_REVISION`, stable PID, unchanged restart count, and 15 seconds of `active/running` state. Bootstrap applies the same startup-record contract and a bounded 15-second stable invocation/restart check so cold starts on the production VM can publish readiness before the check expires.
 
 ## Public log policy
 
