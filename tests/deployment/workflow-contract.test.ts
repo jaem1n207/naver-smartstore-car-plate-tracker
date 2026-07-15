@@ -451,7 +451,7 @@ describe("production deployment workflow", () => {
     );
     expect(request.run).toContain("Privileged maintenance required");
     expect(request.run).toContain('>>"${GITHUB_STEP_SUMMARY}"');
-    expect(request.run).not.toMatch(/^\s*echo\s+"[^"\n]*(?<!\\)`/mu);
+    expect(request.run).not.toContain("`");
     expect(request.run).toContain(`printf '%s\\n' "\${sanitized_result}"`);
     expect(request.run).not.toMatch(/StrictHostKeyChecking=(?:no|accept-new)/u);
     expect(request.run).not.toMatch(/(?:journalctl|printenv|set -x|ssh -v)/u);

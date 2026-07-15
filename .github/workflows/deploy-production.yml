@@ -263,8 +263,8 @@ jobs:
               echo "## Privileged maintenance required"
               echo
               echo "The Oracle server rejected deployment before stopping the scheduler or building a candidate."
-              printf 'Its reviewed root-owned deployment assets do not match commit `%s`.\n' "${GITHUB_SHA}"
-              printf '%s\n' 'Run the documented privileged maintenance procedure for this exact SHA, then rerun this workflow from `main` with `workflow_dispatch`.'
+              printf 'Its reviewed root-owned deployment assets do not match commit %s.\n' "${GITHUB_SHA}"
+              echo "Run the documented privileged maintenance procedure for this exact SHA, then rerun this workflow from main with workflow_dispatch."
             } >>"${GITHUB_STEP_SUMMARY}"
           fi
 
