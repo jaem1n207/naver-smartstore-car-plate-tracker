@@ -264,12 +264,28 @@ describe("deployment preflight and coordination", () => {
 });
 
 describe("candidate build, sealing, and activation", () => {
+  it("normalizes group-writable directories produced by archive extraction", async () => {
+    const fixture = await DeploymentFixture.create();
+    await fixture.makeArchiveDirectoriesGroupWritable();
+
+    const result = await fixture.deploy(fixture.revisions.b);
+
+    expect(result.code, `${result.stderr}\n${result.stdout}`).toBe(0);
+    expect(await fixture.tarShimLog()).toContain("group-writable archive extracted");
+    expect(await fixture.currentRevision()).toBe(fixture.revisions.b);
+  });
+
   it("runs the secretless transient build contract and seals a release with release.env", async () => {
     const fixture = await DeploymentFixture.create();
 
     const result = await fixture.deploy(fixture.revisions.b);
 
     expect(result.code, result.stderr).toBe(0);
+    const deployment = parseResult(result.stdout);
+    const diagnosticId = z
+      .string()
+      .regex(/^[0-9a-f]{24}$/u)
+      .parse(deployment.diagnosticId);
     const systemdRun = await fixture.systemdRunLog();
     for (const expected of [
       "--wait",
@@ -279,6 +295,7 @@ describe("candidate build, sealing, and activation", () => {
       "MemoryMax=900M",
       "MemorySwapMax=2G",
       "TasksMax=128",
+      "UMask=0022",
       "ProtectSystem=strict",
       "NoNewPrivileges=true",
       "PrivateNetwork=true",
@@ -289,6 +306,26 @@ describe("candidate build, sealing, and activation", () => {
     }
     expect(systemdRun).toContain(`--unit=carplate-fetch-${fixture.revisions.b}`);
     expect(systemdRun).toContain("--unit=carplate-build");
+    expect(
+      systemdRun.match(
+        new RegExp(`--property=SyslogIdentifier=carplate-candidate-${diagnosticId}`, "gu"),
+      ),
+    ).toHaveLength(2);
+    const candidateStages = await fixture.candidateStageLog();
+    for (const stage of [
+      "archive_exported",
+      "dependencies_fetched",
+      "candidate_built",
+      "build_quiescent",
+      "candidate_tree_validated",
+      "required_artifacts_validated",
+      "release_sealed",
+      "candidate_quiescent",
+    ]) {
+      expect(candidateStages).toContain(
+        `--tag carplate-candidate-${diagnosticId} -- stage=${stage}`,
+      );
+    }
     expect(systemdRun).not.toContain("NAVER_");
     expect(systemdRun).not.toContain("GOOGLE_");
     await expect(
@@ -485,7 +522,15 @@ describe("candidate build, sealing, and activation", () => {
     const result = await fixture.deploy(fixture.revisions.b);
 
     expect(result.code).toBe(1);
-    expect(parseResult(result.stdout).outcome).toBe("candidate_failed_restarted");
+    const deployment = parseResult(result.stdout);
+    expect(deployment.outcome).toBe("candidate_failed_restarted");
+    const diagnosticId = z
+      .string()
+      .regex(/^[0-9a-f]{24}$/u)
+      .parse(deployment.diagnosticId);
+    expect(await fixture.candidateStageLog()).toContain(
+      `--tag carplate-candidate-${diagnosticId} -- stage=dependency_fetch_failed`,
+    );
     expect(await fixture.currentRevision()).toBe(fixture.revisions.a);
     expect(await pathExists(join(fixture.appRoot, "candidates", fixture.revisions.b))).toBe(false);
     expect(await pathExists(join(fixture.appRoot, "package-store", fixture.revisions.b))).toBe(
@@ -885,6 +930,7 @@ class DeploymentFixture {
       DEPLOY_EXPECTED_UID: overrides.expectedUid ?? currentUid,
       DEPLOY_HEALTH_SECONDS: overrides.healthSeconds ?? 0,
       DEPLOY_JOURNALCTL_COMMAND: join(this.controlRoot, "journalctl-shim"),
+      DEPLOY_LOGGER_COMMAND: join(this.controlRoot, "logger-shim"),
       DEPLOY_MEMORY_FILE: join(this.controlRoot, "meminfo"),
       DEPLOY_ORIGIN: this.origin,
       DEPLOY_PROC_ROOT: this.procRoot,
@@ -897,6 +943,7 @@ class DeploymentFixture {
       DEPLOY_SYNCHRONIZATION_WAIT_SECONDS: 3,
       DEPLOY_SYSTEMCTL_COMMAND: join(this.controlRoot, "systemctl-shim"),
       DEPLOY_SYSTEMD_RUN_COMMAND: join(this.controlRoot, "systemd-run-shim"),
+      DEPLOY_TAR_COMMAND: join(this.controlRoot, "tar-shim"),
       DEPLOY_TEST_CRASH_AFTER: overrides.crashAfter ?? "",
       RECOVER_APP_ROOT: this.appRoot,
       RECOVER_ATOMIC_FS: join(this.controlRoot, "atomic-fs-shim"),
@@ -952,6 +999,18 @@ class DeploymentFixture {
 
   async setBuildMode(mode: string): Promise<void> {
     await writeFile(join(this.controlRoot, "build-mode"), `${mode}\n`);
+  }
+
+  async makeArchiveDirectoriesGroupWritable(): Promise<void> {
+    await writeFile(join(this.controlRoot, "group-writable-archive"), "1\n");
+  }
+
+  async tarShimLog(): Promise<string> {
+    return await readOptionalFile(join(this.controlRoot, "tar-shim.log"));
+  }
+
+  async candidateStageLog(): Promise<string> {
+    return await readOptionalFile(join(this.controlRoot, "candidate-stage.log"));
   }
 
   async failNextStarts(count: number): Promise<void> {
@@ -1133,6 +1192,32 @@ os.execv(sys.executable, [sys.executable, ${JSON.stringify(atomicFsScript)}, *sy
     await writeExecutable(
       join(this.controlRoot, "df-shim"),
       `#!/bin/sh\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'\nprintf 'test 9999999 0 %s 0%% /\\n' "$(cat ${q(join(this.controlRoot, "disk-kib"))})"\n`,
+    );
+    await writeExecutable(
+      join(this.controlRoot, "tar-shim"),
+      `#!/bin/sh
+set -eu
+destination=''
+previous=''
+for argument in "$@"; do
+  if [ "$previous" = '-C' ]; then
+    destination=$argument
+  fi
+  previous=$argument
+done
+/usr/bin/tar "$@"
+if [ -f ${q(join(this.controlRoot, "group-writable-archive"))} ]; then
+  find "$destination" -type d -exec chmod g+w {} +
+  printf 'group-writable archive extracted\\n' >>${q(join(this.controlRoot, "tar-shim.log"))}
+fi
+`,
+    );
+    await writeExecutable(
+      join(this.controlRoot, "logger-shim"),
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >>${q(join(this.controlRoot, "candidate-stage.log"))}
+`,
     );
     await writeExecutable(join(this.controlRoot, "journalctl-shim"), createJournalctlShim(this));
     await writeExecutable(join(this.controlRoot, "systemctl-shim"), createSystemctlShim(this));

@@ -15,6 +15,8 @@ readonly PRODUCTION_BUILD_SCRIPT=/usr/local/lib/naver-smartstore-car-plate-track
 readonly PRODUCTION_SYSTEMCTL=/usr/bin/systemctl
 readonly PRODUCTION_SYSTEMD_RUN=/usr/bin/systemd-run
 readonly PRODUCTION_JOURNALCTL=/usr/bin/journalctl
+readonly PRODUCTION_LOGGER=/usr/bin/logger
+readonly PRODUCTION_TAR=/usr/bin/tar
 readonly PRODUCTION_DF=/usr/bin/df
 readonly PRODUCTION_FLOCK=/usr/bin/flock
 readonly PRODUCTION_COMMON=/usr/local/lib/naver-smartstore-car-plate-tracker/lib/common.sh
@@ -52,6 +54,8 @@ _deploy_load_configuration() {
   DEPLOY_SYSTEMCTL_COMMAND=$PRODUCTION_SYSTEMCTL
   DEPLOY_SYSTEMD_RUN_COMMAND=$PRODUCTION_SYSTEMD_RUN
   DEPLOY_JOURNALCTL_COMMAND=$PRODUCTION_JOURNALCTL
+  DEPLOY_LOGGER_COMMAND=$PRODUCTION_LOGGER
+  DEPLOY_TAR_COMMAND=$PRODUCTION_TAR
   DEPLOY_DF_COMMAND=$PRODUCTION_DF
   DEPLOY_FLOCK_COMMAND=$PRODUCTION_FLOCK
   DEPLOY_SERVICE=$PRODUCTION_SERVICE
@@ -268,6 +272,29 @@ _deploy_remove_direct_child() {
   rm -rf -- "$child" >/dev/null 2>&1
 }
 
+_deploy_harden_candidate_permissions() {
+  [[ $# -eq 1 ]] || return 1
+  local candidate=$1
+  [[ $candidate == "$DEPLOY_APP_ROOT/candidates"/* \
+    && ${candidate#"$DEPLOY_APP_ROOT/candidates"/} != */* \
+    && -n ${candidate#"$DEPLOY_APP_ROOT/candidates"/} \
+    && -d $candidate \
+    && ! -L $candidate ]] || return 1
+
+  find "$candidate" -type d -exec chmod u-s,g-s,o-t,go-w {} + || return 1
+  find "$candidate" -type f -exec chmod u-s,g-s,o-t,go-w {} + || return 1
+}
+
+_deploy_log_candidate_stage() {
+  [[ $# -eq 1 ]] || return 1
+  local stage=$1
+  [[ $DEPLOY_DIAGNOSTIC_ID =~ ^[0-9a-f]{24}$ ]] || return 1
+  [[ $stage =~ ^[a-z][a-z0-9_]{0,63}$ ]] || return 1
+
+  "$DEPLOY_LOGGER_COMMAND" --tag "carplate-candidate-$DEPLOY_DIAGNOSTIC_ID" \
+    -- "stage=$stage" >/dev/null 2>&1 || true
+}
+
 _deploy_export_candidate() {
   local sha=$1
   local candidate=$DEPLOY_APP_ROOT/candidates/$sha
@@ -281,7 +308,8 @@ _deploy_export_candidate() {
   mkdir -m 0755 "$candidate" "$package_store"
   DEPLOY_BUILD_ARCHIVE=$archive
   git --git-dir="$DEPLOY_REPOSITORY" archive --format=tar "$sha" >"$archive" 2>/dev/null || return 1
-  tar -xf "$archive" -C "$candidate" >/dev/null 2>&1 || return 1
+  "$DEPLOY_TAR_COMMAND" -xf "$archive" -C "$candidate" >/dev/null 2>&1 || return 1
+  _deploy_harden_candidate_permissions "$candidate" || return 1
   rm -f "$archive"
   DEPLOY_BUILD_ARCHIVE=
 
@@ -313,7 +341,9 @@ _deploy_run_isolated_build() {
     --property=MemoryMax=900M \
     --property=MemorySwapMax=2G \
     --property=TasksMax=128 \
+    --property=UMask=0022 \
     --property=LimitFSIZE=536870912 \
+    --property="SyslogIdentifier=carplate-candidate-$DEPLOY_DIAGNOSTIC_ID" \
     --property=ProtectSystem=strict \
     --property=ProtectHome=true \
     --property=PrivateTmp=true \
@@ -356,7 +386,9 @@ _deploy_fetch_dependencies() {
     --property=MemoryMax=600M \
     --property=MemorySwapMax=1G \
     --property=TasksMax=64 \
+    --property=UMask=0022 \
     --property=LimitFSIZE=536870912 \
+    --property="SyslogIdentifier=carplate-candidate-$DEPLOY_DIAGNOSTIC_ID" \
     --property=ProtectSystem=strict \
     --property=ProtectHome=true \
     --property=PrivateTmp=true \
@@ -476,25 +508,62 @@ _deploy_prepare_release() {
   DEPLOY_BUILD_CANDIDATE=$candidate
   DEPLOY_BUILD_PACKAGE_STORE=$package_store
   if ! _deploy_export_candidate "$sha"; then
+    _deploy_log_candidate_stage archive_export_failed
     _deploy_remove_build_workspace
     return 1
   fi
+  _deploy_log_candidate_stage archive_exported
 
   local build_status=0
-  _deploy_fetch_dependencies "$sha" "$candidate" "$package_store" || build_status=$?
-  if (( build_status == 0 )); then
-    _deploy_run_isolated_build "$sha" "$candidate" "$package_store" || build_status=$?
+  if _deploy_fetch_dependencies "$sha" "$candidate" "$package_store"; then
+    _deploy_log_candidate_stage dependencies_fetched
+  else
+    build_status=$?
+    _deploy_log_candidate_stage dependency_fetch_failed
   fi
-  _deploy_validate_quiescence "$candidate" "$cgroup_name" || return 1
-  if [[ $build_status -ne 0 ]] \
-    || ! validate_candidate_tree "$candidate" \
-    || [[ ! -f $candidate/dist/src/scheduler/main.js || -L $candidate/dist/src/scheduler/main.js ]] \
-    || [[ ! -d $candidate/node_modules || -L $candidate/node_modules ]] \
-    || ! _deploy_seal_release "$sha" "$candidate"; then
+  if (( build_status == 0 )); then
+    if _deploy_run_isolated_build "$sha" "$candidate" "$package_store"; then
+      _deploy_log_candidate_stage candidate_built
+    else
+      build_status=$?
+      _deploy_log_candidate_stage candidate_build_failed
+    fi
+  fi
+  if ! _deploy_validate_quiescence "$candidate" "$cgroup_name"; then
+    _deploy_log_candidate_stage build_quiescence_failed
+    return 1
+  fi
+  _deploy_log_candidate_stage build_quiescent
+  if [[ $build_status -ne 0 ]]; then
     _deploy_remove_build_workspace
     return 1
   fi
-  _deploy_validate_quiescence "$candidate" "$cgroup_name" || return 1
+  if ! validate_candidate_tree "$candidate"; then
+    _deploy_log_candidate_stage candidate_tree_validation_failed
+    _deploy_remove_build_workspace
+    return 1
+  fi
+  _deploy_log_candidate_stage candidate_tree_validated
+  if [[ ! -f $candidate/dist/src/scheduler/main.js \
+    || -L $candidate/dist/src/scheduler/main.js \
+    || ! -d $candidate/node_modules \
+    || -L $candidate/node_modules ]]; then
+    _deploy_log_candidate_stage required_artifacts_validation_failed
+    _deploy_remove_build_workspace
+    return 1
+  fi
+  _deploy_log_candidate_stage required_artifacts_validated
+  if ! _deploy_seal_release "$sha" "$candidate"; then
+    _deploy_log_candidate_stage release_seal_failed
+    _deploy_remove_build_workspace
+    return 1
+  fi
+  _deploy_log_candidate_stage release_sealed
+  if ! _deploy_validate_quiescence "$candidate" "$cgroup_name"; then
+    _deploy_log_candidate_stage candidate_quiescence_failed
+    return 1
+  fi
+  _deploy_log_candidate_stage candidate_quiescent
   _deploy_remove_build_workspace
 }
 
