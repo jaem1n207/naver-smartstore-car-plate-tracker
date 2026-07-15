@@ -514,6 +514,22 @@ The deploy job prints one allowlisted result containing only `outcome`, requeste
 
 Candidate and recovery outcomes return a failing workflow even when the previous release was restored. That is intentional.
 
+For `candidate_failed_restarted`, copy the 24-character `diagnosticId` from the allowlisted result and inspect only that candidate's fixed stage records and secretless fetch/build journal on Oracle. Keep the journal on Oracle rather than pasting it into a public issue or Actions log.
+
+```bash
+# [Oracle]
+DIAGNOSTIC_ID=replace-with-24-character-id; sudo journalctl -t "carplate-candidate-${DIAGNOSTIC_ID}" -n 200 --no-pager --output=cat
+```
+
+The last fixed stage identifies the boundary without logging paths or credentials. Failure stages are `archive_export_failed`, `dependency_fetch_failed`, `candidate_build_failed`, `build_quiescence_failed`, `candidate_tree_validation_failed`, `required_artifacts_validation_failed`, `release_seal_failed`, and `candidate_quiescence_failed`. A successful candidate ends with `stage=candidate_quiescent`.
+
+Deployers installed before diagnostic correlation was added used the requested SHA in the transient unit names. For one of those older failures, use the `requestedSha` instead.
+
+```bash
+# [Oracle]
+REQUESTED_SHA=replace-with-40-character-sha; sudo journalctl -u "carplate-fetch-${REQUESTED_SHA}.service" -u "carplate-build-${REQUESTED_SHA}.service" -n 200 --no-pager --output=cat
+```
+
 Verify the durable marker, symlink, service, and current invocation on Oracle.
 
 **[Oracle]**
@@ -816,7 +832,8 @@ Useful distinctions:
 
 - A missing or mismatched `deployed-sha`, `current`, or `release.env` is deployment-state corruption. Recovery fails closed instead of guessing.
 - A present `activation-state` means activation was interrupted. The recovery unit should reconcile it before the scheduler starts.
-- `candidate_failed_restarted` points to dependency install, build, syntax, sealing, disk, memory, swap, timeout, or isolation validation before activation.
+- `candidate_failed_restarted` points to dependency install, build, syntax, sealing, disk, memory, swap, timeout, or isolation validation before activation. Query `carplate-candidate-<diagnosticId>` as shown above; do not rely on a broad text grep because the opaque ID was not previously present in journal messages.
+- If the last stage is `candidate_tree_validation_failed`, inspect candidate metadata on Oracle. One known host-dependent cause was GNU tar preserving `0775` directory modes when root extracted `git archive`; the deployer now strips group/other write and special bits immediately after extraction and enforces `UMask=0022` for fetch/build units.
 - `activation_failed_rolled_back` points to service start or invocation health after `current` changed.
 - `deployment_recovery_failed` means no release passed health and needs immediate maintenance.
 - `scheduled sync failed` is an application job failure. A successful scheduler process does not prove Naver, Google, DNS, or the network is healthy.
