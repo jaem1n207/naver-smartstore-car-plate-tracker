@@ -14,9 +14,9 @@ const nodeVersionPath = join(repositoryRoot, ".node-version");
 const packageJsonPath = join(repositoryRoot, "package.json");
 
 const expectedActionPins = new Set([
-  "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
-  "actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38",
-  "pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1",
+  "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+  "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+  "pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271",
   "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
 ]);
 
