@@ -69,7 +69,7 @@ Operator tabs appear first:
 5. `<두 스토어 표시명> 차량번호 중복`
 
 Each operator table exposes the following decision-first columns in order: `차량번호`, `중복 상태`, `상품 URL`, `스토어 표시명`, `전시 상태`, `상품 상태`, `상품명`, `최초 감지일시`, `마지막 동기화일시`, `관리자 메모`, `마지막 오류일시`, and `오류 메시지`. Duplicate views are calculated from normalized vehicle plate numbers.
-The three duplicate views are mutually exclusive: each store-specific tab contains duplicates found only inside that store, while the cross-store tab contains every plate present in both stores.
+The duplicate tabs are task-oriented views and intentionally overlap. Each store-specific internal duplicate tab contains that store's rows marked `같은 스토어 내 중복` or `같은 스토어 + 두 스토어 중복`; the cross-store tab contains rows marked `두 스토어 간 중복` or `같은 스토어 + 두 스토어 중복`. A row duplicated both ways therefore appears in its own store's internal action queue and in the cross-store view.
 Duplicate rows appear before unique rows in every operator table. Rows sharing a normalized plate stay adjacent; only the `차량번호` and `중복 상태` cells use one light amber group fill and border. The remaining row cells keep neutral banding, normal `ON` and `SALE` states stay unfilled, and only exception statuses use stable semantic colors. The first two columns remain frozen and the header uses white text on dark teal.
 
 Developer tabs appear afterward:
