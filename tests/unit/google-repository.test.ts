@@ -855,6 +855,30 @@ describe("GoogleSheetRepository", () => {
     },
   );
 
+  it("excludes deleted duplicated rows from every derived view", async () => {
+    for (let index = 0; index < 6; index += 1) {
+      googleapisMock.queueGetValues([]);
+    }
+    const deletedDuplicate: SheetProductRow = {
+      ...googleDuplicateRow("A", "7101", "60바6000", "duplicated_both"),
+      productStatus: "DELETE",
+      extractionStatus: "not_found",
+    };
+    const repository = await createRepository();
+
+    await repository.writeViews([deletedDuplicate]);
+
+    for (let index = 0; index < 5; index += 1) {
+      expect(googleapisMock.updateCalls[index]?.requestBody?.values).toEqual(
+        expectedOperatorValues([], []),
+      );
+    }
+    expect(googleapisMock.updateCalls[5]?.requestBody?.values).toEqual([
+      RAW_DATA_HEADERS,
+      blankRawDataRow(),
+    ]);
+  });
+
   it("creates a native Google Sheets table for a managed view without one", async () => {
     for (let index = 0; index < 6; index += 1) {
       googleapisMock.queueGetValues([]);
