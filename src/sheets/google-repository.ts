@@ -4,7 +4,6 @@ import {
   type sheets_v4,
 } from "googleapis/build/src/apis/sheets/index.js";
 import { z } from "zod";
-import type { DuplicateStatus } from "../domain/duplicates/types.js";
 import {
   createManagedSheetTabs,
   OPERATOR_VIEW_COLUMNS,
@@ -24,6 +23,8 @@ import {
   displayStatusStyle,
   duplicateStatusStyle,
   findDuplicateGroups,
+  hasAcrossStoresDuplicate,
+  hasSameStoreDuplicate,
   productStatusStyle,
   SHEET_HEADER_STYLE,
   sortOperatorRows,
@@ -129,15 +130,15 @@ export class GoogleSheetRepository implements SheetRepository {
     await this.replaceOperatorSheet(this.tabNames.storeBView, activeRows.filter(isStoreBRow));
     await this.replaceOperatorSheet(
       this.tabNames.storeADuplicates,
-      activeRows.filter((row) => isStoreARow(row) && isSameStoreOnlyDuplicate(row)),
+      activeRows.filter((row) => isStoreARow(row) && hasSameStoreDuplicate(row.duplicateStatus)),
     );
     await this.replaceOperatorSheet(
       this.tabNames.storeBDuplicates,
-      activeRows.filter((row) => isStoreBRow(row) && isSameStoreOnlyDuplicate(row)),
+      activeRows.filter((row) => isStoreBRow(row) && hasSameStoreDuplicate(row.duplicateStatus)),
     );
     await this.replaceOperatorSheet(
       this.tabNames.acrossStoresDuplicates,
-      activeRows.filter(hasAcrossStoresDuplicate),
+      activeRows.filter((row) => hasAcrossStoresDuplicate(row.duplicateStatus)),
     );
     await this.replaceSheet(
       this.tabNames.extractionFailures,
@@ -781,7 +782,7 @@ function duplicateGroupStyleForRows(
 ): DuplicateGroupStyle {
   const groupRows = rows.slice(group.startIndex, group.endIndex);
 
-  const statusPriority: readonly DuplicateStatus[] = [
+  const statusPriority: readonly SheetProductRow["duplicateStatus"][] = [
     "duplicated_both",
     "duplicated_across_stores",
     "duplicated_in_same_store",
@@ -941,22 +942,6 @@ function isStoreBRow(row: SheetProductRow): boolean {
   return row.storeKey === "B";
 }
 
-function hasAcrossStoresDuplicate(row: SheetProductRow): boolean {
-  return isDuplicateStatus(row.duplicateStatus, "duplicated_across_stores", "duplicated_both");
-}
-
-function isSameStoreOnlyDuplicate(row: SheetProductRow): boolean {
-  return row.duplicateStatus === "duplicated_in_same_store";
-}
-
 function hasExtractionFailure(row: SheetProductRow): boolean {
   return row.extractionStatus !== "success";
-}
-
-function isDuplicateStatus(
-  status: DuplicateStatus,
-  primaryStatus: DuplicateStatus,
-  sharedStatus: DuplicateStatus,
-): boolean {
-  return status === primaryStatus || status === sharedStatus;
 }
