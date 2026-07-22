@@ -1,10 +1,12 @@
 # Inclusive Internal Duplicate Views Design
 
+**Status:** Implemented and verified on 2026-07-22.
+
 ## Goal
 
 Make each store-specific internal duplicate tab a complete action queue for duplicate listings inside that store. A listing must not disappear from the internal queue merely because the same normalized vehicle plate also exists in the other store.
 
-## Current Problem
+## Problem Before This Change
 
 The domain model already distinguishes four row-level states:
 
@@ -13,7 +15,7 @@ The domain model already distinguishes four row-level states:
 - `duplicated_across_stores`
 - `duplicated_both`
 
-The current store-specific tabs include only `duplicated_in_same_store`. This makes the three duplicate tabs mutually exclusive, but it hides `duplicated_both` rows from the internal queue. For example, when store A has two listings for one plate and store B has one, the two store A listings appear only in the cross-store tab even though resolving the internal duplication is the operator's first priority.
+The store-specific tabs included only `duplicated_in_same_store`. This made the three duplicate tabs mutually exclusive and hid `duplicated_both` rows from the internal queue. For example, when store A had two listings for one plate and store B had one, the two store A listings appeared only in the cross-store tab even though resolving the internal duplication was the operator's first priority.
 
 ## Decision
 
@@ -42,7 +44,7 @@ Deleted products remain excluded from all derived operator views.
 
 Duplicate analysis remains in `src/domain/duplicates/analyze.ts`; it continues to assign one exact status to each product row from normalized plate counts.
 
-View membership becomes a shared Sheets-layer concern. Define reusable pure predicates for:
+View membership is a shared Sheets-layer concern. Reusable pure predicates define:
 
 - a status that represents duplication within the row's own store;
 - a status that represents duplication across stores.
@@ -70,17 +72,17 @@ Unknown duplicate statuses continue to fail through the existing strict parsing 
 
 ## Documentation Updates
 
-The implementation must update every current operator-facing or operational document that describes or verifies duplicate view membership:
+The implementation updated every current operator-facing or operational document that describes or verifies duplicate view membership:
 
-- `README.md`: replace the mutually exclusive view statement with the task-oriented inclusive rules.
-- `docs/architecture/google-sheets-layout.md`: update Duplicate Semantics to describe intentional overlap and the exact membership of each view.
-- `docs/operations/live-smoke-test.md`: require verification of an A:2/B:1 or A:1/B:2 case in both the appropriate internal tab and the cross-store tab.
+- `README.md`: describes the task-oriented inclusive rules.
+- `docs/architecture/google-sheets-layout.md`: describes intentional overlap and the exact membership of each view.
+- `docs/operations/live-smoke-test.md`: verifies an A:2/B:1 or A:1/B:2 case in both the appropriate internal tab and the cross-store tab.
 
 Historical design specifications and completed implementation plans remain unchanged records of earlier decisions. This specification supersedes only their former mutually exclusive view-membership decision.
 
 ## Verification
 
-Automated tests must cover the membership matrix through both repository implementations:
+Automated tests cover the membership matrix through both repository implementations:
 
 - A:2/B:1 includes only the two A rows in the A internal tab and all three rows in the cross-store tab.
 - A:1/B:2 includes only the two B rows in the B internal tab and all three rows in the cross-store tab.
@@ -91,7 +93,7 @@ Automated tests must cover the membership matrix through both repository impleme
 - `duplicated_both` keeps the exact Korean label and approved status-specific styling in an internal tab.
 - The Google Sheets and in-memory repositories produce equivalent membership results.
 
-Run the relevant unit and integration suites, then the repository's full typecheck, lint, formatting, build, unit, integration, E2E, and visual verification before shipping.
+The final repository gate passed typecheck, lint, formatting, build, unit, integration, deployment, E2E, and visual verification before merge.
 
 ## Acceptance Criteria
 

@@ -1,6 +1,8 @@
 # Inclusive Internal Duplicate Views Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+**Status:** Completed and verified on 2026-07-22.
+
+> **Execution record:** The checked steps below were completed with subagent-driven development and independent review. Final review also added direct Google `DELETE` projection coverage. A separate macOS deployment-test failure was traced to non-canonical `/var/folders/...` fixture roots and fixed by resolving each security-sensitive temporary root before production validation. The final `pnpm test:all` gate passed.
 
 **Goal:** Make every store-specific internal duplicate tab include all active rows duplicated inside that store, including rows that are also duplicated across stores.
 
@@ -57,7 +59,7 @@
 - Produces: `hasAcrossStoresDuplicate(status: DuplicateStatus): boolean`.
 - Produces: in-memory internal and cross-store views selected from those predicates after the existing `DELETE` filter.
 
-- [ ] **Step 1: Replace the mutually exclusive in-memory test with the complete failing membership matrix**
+- [x] **Step 1: Replace the mutually exclusive in-memory test with the complete failing membership matrix**
 
 Add the following typed cases after `baseRow` in `tests/unit/in-memory-sheet-repository.test.ts`:
 
@@ -181,7 +183,7 @@ function channelProductNumbers(rows: readonly SheetProductRow[] | undefined): st
 }
 ```
 
-- [ ] **Step 2: Run the in-memory regression test to verify RED**
+- [x] **Step 2: Run the in-memory regression test to verify RED**
 
 Run:
 
@@ -191,7 +193,7 @@ pnpm vitest run tests/unit/in-memory-sheet-repository.test.ts
 
 Expected: the A:2/B:1, A:1/B:2, and A:2/B:2 cases fail because `duplicated_both` rows are absent from internal duplicate views.
 
-- [ ] **Step 3: Add the shared pure membership predicates**
+- [x] **Step 3: Add the shared pure membership predicates**
 
 Add these exports after `findDuplicateGroups` in `src/sheets/operator-view.ts`:
 
@@ -207,7 +209,7 @@ export function hasAcrossStoresDuplicate(status: DuplicateStatus): boolean {
 
 They intentionally accept `DuplicateStatus`, not `SheetProductRow`, so status semantics stay independent from store selection.
 
-- [ ] **Step 4: Make the in-memory repository consume the shared predicates**
+- [x] **Step 4: Make the in-memory repository consume the shared predicates**
 
 Remove the `DuplicateStatus` type import. Replace the `operator-view.js` import with:
 
@@ -239,7 +241,7 @@ Replace the three duplicate projections in `writeViews` with:
 
 Delete the local `hasAcrossStoresDuplicate`, `isSameStoreOnlyDuplicate`, and `isDuplicateStatus` functions. Keep `hasExtractionFailure`, `isStoreARow`, and `isStoreBRow` unchanged.
 
-- [ ] **Step 5: Run focused tests and typecheck to verify GREEN**
+- [x] **Step 5: Run focused tests and typecheck to verify GREEN**
 
 Run:
 
@@ -257,7 +259,7 @@ pnpm typecheck
 
 Expected: TypeScript exits successfully with no unused imports or signature errors.
 
-- [ ] **Step 6: Commit the shared membership unit**
+- [x] **Step 6: Commit the shared membership unit**
 
 ```bash
 git add src/sheets/operator-view.ts src/sheets/in-memory-repository.ts tests/unit/in-memory-sheet-repository.test.ts
@@ -279,7 +281,7 @@ Justification: the shared predicate, its first repository consumer, and the cons
 - Consumes: `hasAcrossStoresDuplicate(status: DuplicateStatus): boolean` from Task 1.
 - Produces: production Sheet values whose internal and cross-store membership matches the in-memory repository exactly.
 
-- [ ] **Step 1: Add the complete Google repository membership matrix**
+- [x] **Step 1: Add the complete Google repository membership matrix**
 
 Add the following definitions after `baseRow` in `tests/unit/google-repository.test.ts`:
 
@@ -424,7 +426,7 @@ function productRow(rows: readonly SheetProductRow[], channelProductNo: string):
 }
 ```
 
-- [ ] **Step 2: Extend the existing formatting regression to the internal tab**
+- [x] **Step 2: Extend the existing formatting regression to the internal tab**
 
 In `formats a realistic mixed group on the across-store duplicate tab`, add this assertion after the existing cross-store formatting assertions:
 
@@ -448,7 +450,7 @@ expect(
 
 This verifies that `duplicated_both` keeps its approved red palette inside an internal duplicate tab while same-store-only rows keep amber.
 
-- [ ] **Step 3: Run the Google repository test to verify RED**
+- [x] **Step 3: Run the Google repository test to verify RED**
 
 Run:
 
@@ -458,7 +460,7 @@ pnpm vitest run tests/unit/google-repository.test.ts
 
 Expected: asymmetric and A:2/B:2 matrix cases fail because internal tables omit `duplicated_both`; the new sheet 3 formatting assertion also sees only same-store-only rows.
 
-- [ ] **Step 4: Make the Google repository consume the shared predicates**
+- [x] **Step 4: Make the Google repository consume the shared predicates**
 
 Remove the `DuplicateStatus` type import. Add `hasAcrossStoresDuplicate` and `hasSameStoreDuplicate` to the existing `operator-view.js` import:
 
@@ -494,7 +496,7 @@ await this.replaceOperatorSheet(
 
 Delete the local `hasAcrossStoresDuplicate`, `isSameStoreOnlyDuplicate`, and `isDuplicateStatus` functions. Keep active-product, store, and extraction-failure predicates unchanged.
 
-- [ ] **Step 5: Run repository parity and focused verification**
+- [x] **Step 5: Run repository parity and focused verification**
 
 Run:
 
@@ -512,7 +514,7 @@ pnpm typecheck
 
 Expected: TypeScript exits successfully.
 
-- [ ] **Step 6: Commit the production projection**
+- [x] **Step 6: Commit the production projection**
 
 ```bash
 git add src/sheets/google-repository.ts tests/unit/google-repository.test.ts
@@ -531,7 +533,7 @@ git commit -m "Apply inclusive duplicate views to Google Sheets"
 - Consumes: the final view membership rules implemented in Tasks 1 and 2.
 - Produces: canonical user and architecture descriptions that no longer claim the duplicate tabs are mutually exclusive.
 
-- [ ] **Step 1: Update the README's operator-tab contract**
+- [x] **Step 1: Update the README's operator-tab contract**
 
 Replace the mutually exclusive sentence after the operator column description with:
 
@@ -539,7 +541,7 @@ Replace the mutually exclusive sentence after the operator column description wi
 The duplicate tabs are task-oriented views and intentionally overlap. Each store-specific internal duplicate tab contains that store's rows marked `같은 스토어 내 중복` or `같은 스토어 + 두 스토어 중복`; the cross-store tab contains rows marked `두 스토어 간 중복` or `같은 스토어 + 두 스토어 중복`. A row duplicated both ways therefore appears in its own store's internal action queue and in the cross-store view.
 ```
 
-- [ ] **Step 2: Update the architecture's Duplicate Semantics section**
+- [x] **Step 2: Update the architecture's Duplicate Semantics section**
 
 Replace the paragraph after the three status definitions with these exact paragraphs:
 
@@ -553,7 +555,7 @@ The duplicate tabs are task-oriented projections rather than mutually exclusive 
 The next successful synchronization rewrites the derived duplicate tabs with these membership rules. No spreadsheet migration or manual cleanup is required.
 ```
 
-- [ ] **Step 3: Verify current behavior documentation and formatting**
+- [x] **Step 3: Verify current behavior documentation and formatting**
 
 Run:
 
@@ -571,7 +573,7 @@ pnpm exec prettier README.md docs/architecture/google-sheets-layout.md --check
 
 Expected: both files use Prettier code style.
 
-- [ ] **Step 4: Commit the canonical descriptions**
+- [x] **Step 4: Commit the canonical descriptions**
 
 ```bash
 git add README.md docs/architecture/google-sheets-layout.md
@@ -591,7 +593,7 @@ Justification: README and the Sheets architecture document are the two canonical
 - Consumes: the shipped view membership and styling behavior from Tasks 1 and 2.
 - Produces: an explicit live verification step for the asymmetric duplicate case that originally exposed the operator confusion.
 
-- [ ] **Step 1: Strengthen the duplicate-view smoke check**
+- [x] **Step 1: Strengthen the duplicate-view smoke check**
 
 Replace sequence item 13 with:
 
@@ -599,7 +601,7 @@ Replace sequence item 13 with:
 13. Confirm a known asymmetric duplicate case: for a normalized plate with two active listings in one store and one in the other, the two same-store listings appear in that store's internal duplicate tab, the other store's internal duplicate tab has no row for that plate, and all three listings appear in the cross-store duplicate tab. Confirm the two internally duplicated rows retain `같은 스토어 + 두 스토어 중복` in both views.
 ```
 
-- [ ] **Step 2: Run documentation checks**
+- [x] **Step 2: Run documentation checks**
 
 Run:
 
@@ -617,7 +619,7 @@ git diff --check
 
 Expected: no whitespace errors.
 
-- [ ] **Step 3: Run the complete repository verification gate**
+- [x] **Step 3: Run the complete repository verification gate**
 
 Run:
 
@@ -627,7 +629,7 @@ pnpm test:all
 
 Expected: typecheck, ESLint, Prettier, unit, integration, deployment, E2E, and visual suites all pass. No command may contact the live Naver API or production Google Sheet.
 
-- [ ] **Step 4: Audit the final diff against the approved design**
+- [x] **Step 4: Audit the final diff against the approved design**
 
 Run:
 
@@ -645,14 +647,14 @@ git status --short
 
 Expected before the final documentation commit: only `docs/operations/live-smoke-test.md` is modified.
 
-- [ ] **Step 5: Commit the live verification procedure**
+- [x] **Step 5: Commit the live verification procedure**
 
 ```bash
 git add docs/operations/live-smoke-test.md
 git commit -m "Update duplicate view smoke verification"
 ```
 
-- [ ] **Step 6: Verify the final history and clean worktree**
+- [x] **Step 6: Verify the final history and clean worktree**
 
 Run:
 
