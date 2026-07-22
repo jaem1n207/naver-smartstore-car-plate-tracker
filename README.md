@@ -18,6 +18,8 @@ pnpm test
 pnpm sync:once
 ```
 
+`pnpm test` runs the complete local verification contract, including deployment, E2E, and visual tests. See the [testing convention](docs/conventions/testing.md) for focused commands and platform-specific expectations.
+
 ## Live API Guard
 
 Live Naver Commerce API calls require both:
@@ -42,11 +44,9 @@ See [Google service account setup](docs/operations/google-service-account.md) fo
 
 Production uses a fixed-IP Oracle VM, Node.js `22.23.1`, pnpm `11.10.0`, immutable compiled releases, and the built-in scheduler under hardened systemd. It does not run `tsx` or `pnpm scheduler` in production.
 
-Follow the ordered [automatic production deployment runbook](docs/operations/automatic-production-deployment.md) for backup, moving the existing `/opt` checkout to `/srv/carplate-bootstrap-source`, persistent 2 GiB swap, exact runtime installation, the initial built checkout, dedicated users, secret migration, forced deploy key, GitHub `production` environment, branch protection, first deployment, reboot verification, rollback drill, rotation, and diagnostics. The currently open deployment PR is **#2**.
+Follow the ordered [automatic production deployment runbook](docs/operations/automatic-production-deployment.md) for backup, immutable runtime installation, dedicated users, secret migration, forced deploy keys, the GitHub `production` environment, branch protection, reboot verification, rollback drills, rotation, privileged maintenance, and diagnostics. The one-time PR #2 bootstrap migration is complete; routine pull requests use the repository's normal merge policy and verified `main` deployment path.
 
 Use the [maintainer workstation recovery and handoff guide](docs/operations/maintainer-workstation-recovery.md) when replacing or losing the maintainer Mac. It records the current migration checkpoint, authoritative state locations, off-repository continuity inventory, planned key handoff, and break-glass recovery boundary without storing real credentials.
-
-PR #2 must be merged with **Create a merge commit**, not squash merge or rebase merge. Bootstrap records the PR head as the initial deployed SHA, and the monotonic deployer requires the new `main` revision to be its descendant.
 
 After the one-time privileged bootstrap, merging a verified PR into `main` is the normal deployment. GitHub-hosted runners build and connect directly to Oracle, so the developer's MacBook may be off. Routine `main` deployments do not update root-owned deployment scripts, systemd units, SSH policy, sudoers, or `/etc` secrets; those changes require an explicit reviewed bootstrap-maintenance operation.
 
