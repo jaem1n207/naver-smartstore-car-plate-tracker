@@ -351,6 +351,71 @@ const baseRow: SheetProductRow = {
   manualNote: "operator note",
 };
 
+type GoogleDuplicateViewCase = {
+  readonly name: string;
+  readonly rows: SheetProductRow[];
+  readonly storeAInternal: string[];
+  readonly storeBInternal: string[];
+  readonly crossStore: string[];
+};
+
+const GOOGLE_DUPLICATE_VIEW_CASES: GoogleDuplicateViewCase[] = [
+  {
+    name: "A:2, B:0",
+    rows: [
+      googleDuplicateRow("A", "1101", "10가1000", "duplicated_in_same_store"),
+      googleDuplicateRow("A", "1102", "10가1000", "duplicated_in_same_store"),
+    ],
+    storeAInternal: ["1101", "1102"],
+    storeBInternal: [],
+    crossStore: [],
+  },
+  {
+    name: "A:2, B:1",
+    rows: [
+      googleDuplicateRow("A", "2102", "20나2000", "duplicated_both"),
+      googleDuplicateRow("B", "4101", "20나2000", "duplicated_across_stores"),
+      googleDuplicateRow("A", "2101", "20나2000", "duplicated_both"),
+    ],
+    storeAInternal: ["2101", "2102"],
+    storeBInternal: [],
+    crossStore: ["2101", "2102", "4101"],
+  },
+  {
+    name: "A:1, B:2",
+    rows: [
+      googleDuplicateRow("B", "4202", "30다3000", "duplicated_both"),
+      googleDuplicateRow("A", "3101", "30다3000", "duplicated_across_stores"),
+      googleDuplicateRow("B", "4201", "30다3000", "duplicated_both"),
+    ],
+    storeAInternal: [],
+    storeBInternal: ["4201", "4202"],
+    crossStore: ["4201", "4202", "3101"],
+  },
+  {
+    name: "A:2, B:2",
+    rows: [
+      googleDuplicateRow("B", "4302", "40라4000", "duplicated_both"),
+      googleDuplicateRow("A", "5102", "40라4000", "duplicated_both"),
+      googleDuplicateRow("B", "4301", "40라4000", "duplicated_both"),
+      googleDuplicateRow("A", "5101", "40라4000", "duplicated_both"),
+    ],
+    storeAInternal: ["5101", "5102"],
+    storeBInternal: ["4301", "4302"],
+    crossStore: ["5101", "5102", "4301", "4302"],
+  },
+  {
+    name: "A:1, B:1",
+    rows: [
+      googleDuplicateRow("B", "4401", "50마5000", "duplicated_across_stores"),
+      googleDuplicateRow("A", "6101", "50마5000", "duplicated_across_stores"),
+    ],
+    storeAInternal: [],
+    storeBInternal: [],
+    crossStore: ["6101", "4401"],
+  },
+];
+
 describe("GoogleSheetRepository", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -567,6 +632,23 @@ describe("GoogleSheetRepository", () => {
       [rgbStyle("#FCE8E6"), rgbStyle("#FCE8E6")],
       [rgbStyle("#E8F0FE"), rgbStyle("#E8F0FE")],
     ]);
+    const storeAInternalUpdateCellsRequest = requests
+      .filter(hasUpdateCellsRequest)
+      .find((request) => request.updateCells.start.sheetId === 3);
+    const storeAInternalFormattedRows = storeAInternalUpdateCellsRequest?.updateCells.rows ?? [];
+
+    expect(
+      storeAInternalFormattedRows.map((row) =>
+        [0, 1].map(
+          (columnIndex) => row.values?.[columnIndex]?.userEnteredFormat?.backgroundColorStyle,
+        ),
+      ),
+    ).toEqual([
+      [rgbStyle("#FCE8E6"), rgbStyle("#FCE8E6")],
+      [rgbStyle("#FCE8E6"), rgbStyle("#FCE8E6")],
+      [rgbStyle("#FFF3C4"), rgbStyle("#FFF3C4")],
+      [rgbStyle("#FFF3C4"), rgbStyle("#FFF3C4")],
+    ]);
     expect(exceptionBackgrounds).toEqual([rgbStyle("#FCE8D5"), rgbStyle("#FCE8D5")]);
     expect(formattedCells[3]?.userEnteredFormat).toEqual({ textFormat: { bold: false } });
     expect(requests).toContainEqual({
@@ -751,43 +833,49 @@ describe("GoogleSheetRepository", () => {
     ]);
   });
 
-  it("writes mutually exclusive store-only and cross-store duplicate tables", async () => {
+  it.each(GOOGLE_DUPLICATE_VIEW_CASES)(
+    "writes $name duplicate rows into task-oriented tables",
+    async ({ rows, storeAInternal, storeBInternal, crossStore }) => {
+      for (let index = 0; index < 6; index += 1) {
+        googleapisMock.queueGetValues([]);
+      }
+      const repository = await createRepository();
+
+      await repository.writeViews(rows);
+
+      expect(googleapisMock.updateCalls[2]?.requestBody?.values).toEqual(
+        expectedOperatorValues(rows, storeAInternal),
+      );
+      expect(googleapisMock.updateCalls[3]?.requestBody?.values).toEqual(
+        expectedOperatorValues(rows, storeBInternal),
+      );
+      expect(googleapisMock.updateCalls[4]?.requestBody?.values).toEqual(
+        expectedOperatorValues(rows, crossStore),
+      );
+    },
+  );
+
+  it("excludes deleted duplicated rows from every derived view", async () => {
     for (let index = 0; index < 6; index += 1) {
       googleapisMock.queueGetValues([]);
     }
-    const storeAOnlyDuplicate: SheetProductRow = {
-      ...baseRow,
-      duplicateStatus: "duplicated_in_same_store",
-    };
-    const storeBOnlyDuplicate: SheetProductRow = {
-      ...baseRow,
-      storeKey: "B",
-      storeName: STORE_B_DISPLAY_NAME,
-      channelProductNo: "4001",
-      productUrl: "https://example.com/store-b/products/4001",
-      duplicateStatus: "duplicated_in_same_store",
-    };
-    const crossStoreDuplicate: SheetProductRow = {
-      ...baseRow,
-      channelProductNo: "2002",
-      productUrl: "https://example.com/store-a/products/2002",
-      duplicateStatus: "duplicated_both",
+    const deletedDuplicate: SheetProductRow = {
+      ...googleDuplicateRow("A", "7101", "60바6000", "duplicated_both"),
+      productStatus: "DELETE",
+      extractionStatus: "not_found",
     };
     const repository = await createRepository();
 
-    await repository.writeViews([storeAOnlyDuplicate, storeBOnlyDuplicate, crossStoreDuplicate]);
+    await repository.writeViews([deletedDuplicate]);
 
-    expect(googleapisMock.updateCalls[2]?.requestBody?.values).toEqual([
-      OPERATOR_VIEW_HEADERS,
-      sheetProductRowToOperatorValues(storeAOnlyDuplicate),
-    ]);
-    expect(googleapisMock.updateCalls[3]?.requestBody?.values).toEqual([
-      OPERATOR_VIEW_HEADERS,
-      sheetProductRowToOperatorValues(storeBOnlyDuplicate),
-    ]);
-    expect(googleapisMock.updateCalls[4]?.requestBody?.values).toEqual([
-      OPERATOR_VIEW_HEADERS,
-      sheetProductRowToOperatorValues(crossStoreDuplicate),
+    for (let index = 0; index < 5; index += 1) {
+      expect(googleapisMock.updateCalls[index]?.requestBody?.values).toEqual(
+        expectedOperatorValues([], []),
+      );
+    }
+    expect(googleapisMock.updateCalls[5]?.requestBody?.values).toEqual([
+      RAW_DATA_HEADERS,
+      blankRawDataRow(),
     ]);
   });
 
@@ -1269,6 +1357,54 @@ describe("GoogleSheetRepository", () => {
     );
   });
 });
+
+function googleDuplicateRow(
+  storeKey: SheetProductRow["storeKey"],
+  channelProductNo: string,
+  normalizedPlate: string,
+  duplicateStatus: SheetProductRow["duplicateStatus"],
+): SheetProductRow {
+  const storeName = storeKey === "A" ? STORE_A_DISPLAY_NAME : STORE_B_DISPLAY_NAME;
+  const storeSlug = storeKey === "A" ? "store-east" : "store-west";
+
+  return {
+    ...baseRow,
+    storeKey,
+    storeName,
+    storeBaseUrl: `https://example.com/${storeSlug}`,
+    channelProductNo,
+    productUrl: `https://example.com/${storeSlug}/products/${channelProductNo}`,
+    rawPlate: normalizedPlate,
+    normalizedPlate,
+    duplicateStatus,
+  };
+}
+
+function expectedOperatorValues(
+  rows: readonly SheetProductRow[],
+  channelProductNumbers: readonly string[],
+): string[][] {
+  const values = [
+    OPERATOR_VIEW_HEADERS,
+    ...channelProductNumbers.map((channelProductNo) =>
+      sheetProductRowToOperatorValues(productRow(rows, channelProductNo)),
+    ),
+  ];
+
+  return channelProductNumbers.length === 0
+    ? [...values, OPERATOR_VIEW_HEADERS.map(() => "")]
+    : values;
+}
+
+function productRow(rows: readonly SheetProductRow[], channelProductNo: string): SheetProductRow {
+  const row = rows.find((candidate) => candidate.channelProductNo === channelProductNo);
+
+  if (row === undefined) {
+    throw new Error(`Missing test product row: ${channelProductNo}`);
+  }
+
+  return row;
+}
 
 async function createRepository(
   overrides: Partial<GoogleSheetRepositoryOptions> = {},

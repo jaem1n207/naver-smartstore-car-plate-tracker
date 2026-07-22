@@ -105,7 +105,13 @@ Duplicate identity is the normalized vehicle plate, and each product row receive
 - `duplicated_across_stores`: the plate occurs in both stores, while this row's own store contains exactly one occurrence.
 - `duplicated_both`: the plate occurs in both stores and this row's own store contains at least two occurrences.
 
-The two inventory tabs may contain rows with any of these statuses. Each store-specific duplicate tab currently shows only `duplicated_in_same_store` rows, while the cross-store duplicate tab contains both `duplicated_across_stores` and `duplicated_both` rows. `sheetDuplicateProductRows` deliberately counts every non-unique product row, so two products sharing one plate contribute two rows even though they form one plate group.
+The two inventory tabs may contain rows with any of these statuses. Each store-specific internal duplicate tab contains only that store's rows whose status is `duplicated_in_same_store` or `duplicated_both`. The cross-store duplicate tab contains all rows whose status is `duplicated_across_stores` or `duplicated_both`.
+
+The duplicate tabs are task-oriented projections rather than mutually exclusive categories. A `duplicated_both` row appears intentionally in both its own store's internal duplicate tab and the cross-store tab, preserving the exact `같은 스토어 + 두 스토어 중복` label and style in both places. For an A:2/B:1 plate, the two A rows appear in the A internal tab, no row appears in the B internal tab, and all three rows appear in the cross-store tab.
+
+`sheetDuplicateProductRows` deliberately counts every non-unique product row, so two products sharing one plate contribute two rows even though they form one plate group.
+
+The next successful synchronization rewrites the derived duplicate tabs with these membership rules. No spreadsheet migration or manual cleanup is required.
 
 ## Native Tables And Migration
 

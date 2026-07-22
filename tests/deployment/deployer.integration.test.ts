@@ -7,6 +7,7 @@ import {
   readdir,
   readFile,
   readlink,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -1521,7 +1522,7 @@ async function writeExecutable(path: string, contents: string): Promise<void> {
 }
 
 async function createTemporaryDirectory(prefix: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), prefix));
+  const directory = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   temporaryDirectories.push(directory);
   return directory;
 }

@@ -1,4 +1,3 @@
-import type { DuplicateStatus } from "../domain/duplicates/types.js";
 import {
   A_STORE_DUPLICATES_TAB,
   ACROSS_STORES_DUPLICATES_TAB,
@@ -7,7 +6,11 @@ import {
   B_STORE_VIEW_TAB,
   EXTRACTION_FAILURES_TAB,
 } from "./columns.js";
-import { sortOperatorRows } from "./operator-view.js";
+import {
+  hasAcrossStoresDuplicate,
+  hasSameStoreDuplicate,
+  sortOperatorRows,
+} from "./operator-view.js";
 import type { RunLogRow, SheetProductRow, SheetRepository } from "./types.js";
 
 export class InMemorySheetRepository implements SheetRepository {
@@ -36,13 +39,13 @@ export class InMemorySheetRepository implements SheetRepository {
       [A_STORE_VIEW_TAB]: cloneOperatorRows(activeRows.filter(isStoreARow)),
       [B_STORE_VIEW_TAB]: cloneOperatorRows(activeRows.filter(isStoreBRow)),
       [A_STORE_DUPLICATES_TAB]: cloneOperatorRows(
-        activeRows.filter((row) => isStoreARow(row) && isSameStoreOnlyDuplicate(row)),
+        activeRows.filter((row) => isStoreARow(row) && hasSameStoreDuplicate(row.duplicateStatus)),
       ),
       [B_STORE_DUPLICATES_TAB]: cloneOperatorRows(
-        activeRows.filter((row) => isStoreBRow(row) && isSameStoreOnlyDuplicate(row)),
+        activeRows.filter((row) => isStoreBRow(row) && hasSameStoreDuplicate(row.duplicateStatus)),
       ),
       [ACROSS_STORES_DUPLICATES_TAB]: cloneOperatorRows(
-        activeRows.filter(hasAcrossStoresDuplicate),
+        activeRows.filter((row) => hasAcrossStoresDuplicate(row.duplicateStatus)),
       ),
       [EXTRACTION_FAILURES_TAB]: cloneRows(activeRows.filter(hasExtractionFailure)),
     };
@@ -73,22 +76,6 @@ function isStoreBRow(row: SheetProductRow): boolean {
   return row.storeKey === "B";
 }
 
-function hasAcrossStoresDuplicate(row: SheetProductRow): boolean {
-  return isDuplicateStatus(row.duplicateStatus, "duplicated_across_stores", "duplicated_both");
-}
-
-function isSameStoreOnlyDuplicate(row: SheetProductRow): boolean {
-  return row.duplicateStatus === "duplicated_in_same_store";
-}
-
 function hasExtractionFailure(row: SheetProductRow): boolean {
   return row.extractionStatus !== "success";
-}
-
-function isDuplicateStatus(
-  status: DuplicateStatus,
-  primaryStatus: DuplicateStatus,
-  sharedStatus: DuplicateStatus,
-): boolean {
-  return status === primaryStatus || status === sharedStatus;
 }

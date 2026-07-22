@@ -6,6 +6,7 @@ import {
   mkdtemp,
   readFile,
   readlink,
+  realpath,
   readdir,
   rm,
   stat,
@@ -154,7 +155,7 @@ async function runAtomicFs(root: string, arguments_: string[], input = ""): Prom
 }
 
 async function createRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "carplate-atomic-fs-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "carplate-atomic-fs-")));
   temporaryDirectories.push(root);
   await mkdir(join(root, "deployment"));
   await mkdir(join(root, "releases"));

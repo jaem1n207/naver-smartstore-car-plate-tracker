@@ -24,7 +24,7 @@ Run this only on a fixed-IP staging or production server.
 10. Confirm `원본 데이터`, `차량번호 추출 실패`, and `실행 기록` follow the operator tabs.
 11. Confirm `차량번호 추출 실패` has image-only or no-text products.
 12. Edit `관리자 메모` in `원본 데이터`, rerun once, and confirm the note and `최초 감지일시` are preserved and projected into the matching operator rows. Do not edit the derived operator copy because the next sync rewrites it.
-13. Confirm each store-specific duplicate tab and the cross-store duplicate tab match known normalized plate cases.
+13. Confirm a known asymmetric duplicate case: for a normalized plate with two active listings in one store and one in the other, the two same-store listings appear in that store's internal duplicate tab, the other store's internal duplicate tab has no row for that plate, and all three listings appear in the cross-store duplicate tab. Confirm the two internally duplicated rows retain `같은 스토어 + 두 스토어 중복` in both views.
 14. Review logs for `GW.IP_NOT_ALLOWED`, `GW.AUTHN`, `GW.RATE_LIMIT`, and `GW.QUOTA_LIMIT`.
 
 ## Sync output verification

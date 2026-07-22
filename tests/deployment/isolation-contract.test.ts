@@ -7,6 +7,7 @@ import {
   mkdtemp,
   readFile,
   readlink,
+  realpath,
   readdir,
   rm,
   stat,
@@ -506,7 +507,7 @@ interface BootstrapFixtureOptions {
 async function createBootstrapFixture(
   options: BootstrapFixtureOptions = {},
 ): Promise<BootstrapFixture> {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "carplate-bootstrap-"));
+  const temporaryDirectory = await realpath(await mkdtemp(join(tmpdir(), "carplate-bootstrap-")));
   temporaryDirectories.push(temporaryDirectory);
   const stateRoot = join(temporaryDirectory, "state");
   const appRoot = join(temporaryDirectory, "app");

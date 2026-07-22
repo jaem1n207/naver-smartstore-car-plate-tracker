@@ -33,6 +33,71 @@ const baseRow: SheetProductRow = {
   manualNote: "",
 };
 
+type DuplicateViewCase = {
+  readonly name: string;
+  readonly rows: SheetProductRow[];
+  readonly storeAInternal: string[];
+  readonly storeBInternal: string[];
+  readonly crossStore: string[];
+};
+
+const DUPLICATE_VIEW_CASES: DuplicateViewCase[] = [
+  {
+    name: "A:2, B:0",
+    rows: [
+      duplicateRow("A", "1101", "10가1000", "duplicated_in_same_store"),
+      duplicateRow("A", "1102", "10가1000", "duplicated_in_same_store"),
+    ],
+    storeAInternal: ["1101", "1102"],
+    storeBInternal: [],
+    crossStore: [],
+  },
+  {
+    name: "A:2, B:1",
+    rows: [
+      duplicateRow("A", "2102", "20나2000", "duplicated_both"),
+      duplicateRow("B", "4101", "20나2000", "duplicated_across_stores"),
+      duplicateRow("A", "2101", "20나2000", "duplicated_both"),
+    ],
+    storeAInternal: ["2101", "2102"],
+    storeBInternal: [],
+    crossStore: ["2101", "2102", "4101"],
+  },
+  {
+    name: "A:1, B:2",
+    rows: [
+      duplicateRow("B", "4202", "30다3000", "duplicated_both"),
+      duplicateRow("A", "3101", "30다3000", "duplicated_across_stores"),
+      duplicateRow("B", "4201", "30다3000", "duplicated_both"),
+    ],
+    storeAInternal: [],
+    storeBInternal: ["4201", "4202"],
+    crossStore: ["4201", "4202", "3101"],
+  },
+  {
+    name: "A:2, B:2",
+    rows: [
+      duplicateRow("B", "4302", "40라4000", "duplicated_both"),
+      duplicateRow("A", "5102", "40라4000", "duplicated_both"),
+      duplicateRow("B", "4301", "40라4000", "duplicated_both"),
+      duplicateRow("A", "5101", "40라4000", "duplicated_both"),
+    ],
+    storeAInternal: ["5101", "5102"],
+    storeBInternal: ["4301", "4302"],
+    crossStore: ["5101", "5102", "4301", "4302"],
+  },
+  {
+    name: "A:1, B:1",
+    rows: [
+      duplicateRow("B", "4401", "50마5000", "duplicated_across_stores"),
+      duplicateRow("A", "6101", "50마5000", "duplicated_across_stores"),
+    ],
+    storeAInternal: [],
+    storeBInternal: [],
+    crossStore: ["6101", "4401"],
+  },
+];
+
 describe("InMemorySheetRepository", () => {
   it("excludes deleted rows from every view", async () => {
     const repository = new InMemorySheetRepository();
@@ -52,33 +117,24 @@ describe("InMemorySheetRepository", () => {
     expect(repository.viewRows[B_STORE_DUPLICATES_TAB]).toEqual([]);
   });
 
-  it("keeps store-only and cross-store duplicate views mutually exclusive", async () => {
-    const repository = new InMemorySheetRepository();
-    const storeADuplicate: SheetProductRow = {
-      ...baseRow,
-      duplicateStatus: "duplicated_in_same_store",
-    };
-    const storeBDuplicate: SheetProductRow = {
-      ...baseRow,
-      storeKey: "B",
-      storeName: "Store B",
-      channelProductNo: "4001",
-      productUrl: "https://example.com/store-b/products/4001",
-      duplicateStatus: "duplicated_in_same_store",
-    };
-    const crossStoreDuplicate: SheetProductRow = {
-      ...baseRow,
-      channelProductNo: "2002",
-      productUrl: "https://example.com/store-a/products/2002",
-      duplicateStatus: "duplicated_both",
-    };
+  it.each(DUPLICATE_VIEW_CASES)(
+    "projects $name duplicate rows into task-oriented views",
+    async ({ rows, storeAInternal, storeBInternal, crossStore }) => {
+      const repository = new InMemorySheetRepository();
 
-    await repository.writeViews([storeADuplicate, storeBDuplicate, crossStoreDuplicate]);
+      await repository.writeViews(rows);
 
-    expect(repository.viewRows[A_STORE_DUPLICATES_TAB]).toEqual([storeADuplicate]);
-    expect(repository.viewRows[B_STORE_DUPLICATES_TAB]).toEqual([storeBDuplicate]);
-    expect(repository.viewRows[ACROSS_STORES_DUPLICATES_TAB]).toEqual([crossStoreDuplicate]);
-  });
+      expect(channelProductNumbers(repository.viewRows[A_STORE_DUPLICATES_TAB])).toEqual(
+        storeAInternal,
+      );
+      expect(channelProductNumbers(repository.viewRows[B_STORE_DUPLICATES_TAB])).toEqual(
+        storeBInternal,
+      );
+      expect(channelProductNumbers(repository.viewRows[ACROSS_STORES_DUPLICATES_TAB])).toEqual(
+        crossStore,
+      );
+    },
+  );
 
   it("clones rows at repository boundaries", async () => {
     const repository = new InMemorySheetRepository();
@@ -128,4 +184,30 @@ function firstRow(rows: SheetProductRow[]): SheetProductRow {
   }
 
   return row;
+}
+
+function duplicateRow(
+  storeKey: SheetProductRow["storeKey"],
+  channelProductNo: string,
+  normalizedPlate: string,
+  duplicateStatus: SheetProductRow["duplicateStatus"],
+): SheetProductRow {
+  const storeName = storeKey === "A" ? "Store A" : "Store B";
+  const storeSlug = storeKey === "A" ? "store-a" : "store-b";
+
+  return {
+    ...baseRow,
+    storeKey,
+    storeName,
+    storeBaseUrl: `https://example.com/${storeSlug}`,
+    channelProductNo,
+    productUrl: `https://example.com/${storeSlug}/products/${channelProductNo}`,
+    rawPlate: normalizedPlate,
+    normalizedPlate,
+    duplicateStatus,
+  };
+}
+
+function channelProductNumbers(rows: readonly SheetProductRow[] | undefined): string[] {
+  return (rows ?? []).map((row) => row.channelProductNo);
 }

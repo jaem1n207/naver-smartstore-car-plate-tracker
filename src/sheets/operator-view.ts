@@ -119,6 +119,14 @@ export function findDuplicateGroups(rows: readonly SheetProductRow[]): Duplicate
   return groups;
 }
 
+export function hasSameStoreDuplicate(status: DuplicateStatus): boolean {
+  return status === "duplicated_in_same_store" || status === "duplicated_both";
+}
+
+export function hasAcrossStoresDuplicate(status: DuplicateStatus): boolean {
+  return status === "duplicated_across_stores" || status === "duplicated_both";
+}
+
 export function duplicateStatusStyle(status: DuplicateStatus): DuplicateGroupStyle | undefined {
   switch (status) {
     case "duplicated_in_same_store":

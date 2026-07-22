@@ -18,6 +18,8 @@ pnpm test
 pnpm sync:once
 ```
 
+`pnpm test` runs the complete local verification contract, including deployment, E2E, and visual tests. See the [testing convention](docs/conventions/testing.md) for focused commands and platform-specific expectations.
+
 ## Live API Guard
 
 Live Naver Commerce API calls require both:
@@ -42,11 +44,9 @@ See [Google service account setup](docs/operations/google-service-account.md) fo
 
 Production uses a fixed-IP Oracle VM, Node.js `22.23.1`, pnpm `11.10.0`, immutable compiled releases, and the built-in scheduler under hardened systemd. It does not run `tsx` or `pnpm scheduler` in production.
 
-Follow the ordered [automatic production deployment runbook](docs/operations/automatic-production-deployment.md) for backup, moving the existing `/opt` checkout to `/srv/carplate-bootstrap-source`, persistent 2 GiB swap, exact runtime installation, the initial built checkout, dedicated users, secret migration, forced deploy key, GitHub `production` environment, branch protection, first deployment, reboot verification, rollback drill, rotation, and diagnostics. The currently open deployment PR is **#2**.
+Follow the ordered [automatic production deployment runbook](docs/operations/automatic-production-deployment.md) for backup, immutable runtime installation, dedicated users, secret migration, forced deploy keys, the GitHub `production` environment, branch protection, reboot verification, rollback drills, rotation, privileged maintenance, and diagnostics. The one-time PR #2 bootstrap migration is complete; routine pull requests use the repository's normal merge policy and verified `main` deployment path.
 
 Use the [maintainer workstation recovery and handoff guide](docs/operations/maintainer-workstation-recovery.md) when replacing or losing the maintainer Mac. It records the current migration checkpoint, authoritative state locations, off-repository continuity inventory, planned key handoff, and break-glass recovery boundary without storing real credentials.
-
-PR #2 must be merged with **Create a merge commit**, not squash merge or rebase merge. Bootstrap records the PR head as the initial deployed SHA, and the monotonic deployer requires the new `main` revision to be its descendant.
 
 After the one-time privileged bootstrap, merging a verified PR into `main` is the normal deployment. GitHub-hosted runners build and connect directly to Oracle, so the developer's MacBook may be off. Routine `main` deployments do not update root-owned deployment scripts, systemd units, SSH policy, sudoers, or `/etc` secrets; those changes require an explicit reviewed bootstrap-maintenance operation.
 
@@ -69,7 +69,7 @@ Operator tabs appear first:
 5. `<두 스토어 표시명> 차량번호 중복`
 
 Each operator table exposes the following decision-first columns in order: `차량번호`, `중복 상태`, `상품 URL`, `스토어 표시명`, `전시 상태`, `상품 상태`, `상품명`, `최초 감지일시`, `마지막 동기화일시`, `관리자 메모`, `마지막 오류일시`, and `오류 메시지`. Duplicate views are calculated from normalized vehicle plate numbers.
-The three duplicate views are mutually exclusive: each store-specific tab contains duplicates found only inside that store, while the cross-store tab contains every plate present in both stores.
+The duplicate tabs are task-oriented views and intentionally overlap. Each store-specific internal duplicate tab contains that store's rows marked `같은 스토어 내 중복` or `같은 스토어 + 두 스토어 중복`; the cross-store tab contains rows marked `두 스토어 간 중복` or `같은 스토어 + 두 스토어 중복`. A row duplicated both ways therefore appears in its own store's internal action queue and in the cross-store view.
 Duplicate rows appear before unique rows in every operator table. Rows sharing a normalized plate stay adjacent; only the `차량번호` and `중복 상태` cells use one light amber group fill and border. The remaining row cells keep neutral banding, normal `ON` and `SALE` states stay unfilled, and only exception statuses use stable semantic colors. The first two columns remain frozen and the header uses white text on dark teal.
 
 Developer tabs appear afterward:

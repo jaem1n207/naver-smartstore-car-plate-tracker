@@ -70,6 +70,8 @@ Do not use the MacBook to overwrite Linux snapshots. Use the CI artifact or the 
 - escaping links, special files, unsafe metadata, surviving children, and writable-descriptor rejection;
 - workflow triggers, four-secret scope, strict SSH, pinned actions, CODEOWNERS, and Node/pnpm pins.
 
+Security-sensitive deployment helpers accept only canonical roots and intentionally reject paths that traverse symlink aliases. On macOS, Node may report the temporary directory beneath `/var/folders/...` while its canonical path is `/private/var/folders/...`. Any deployment fixture that passes a freshly created temporary root into production validation must call `realpath()` immediately after `mkdtemp()` and derive all child paths from that result. Do not weaken production validation or rely on a `TMPDIR` override to make the suite pass.
+
 Run focused rollback and boot-recovery coverage with:
 
 **[MacBook]**

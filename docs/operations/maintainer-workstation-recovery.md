@@ -4,16 +4,16 @@ Use this guide when handing the project to another maintainer, replacing the Mac
 
 ## Current migration checkpoint
 
-This is a dated operator checkpoint, not a live health status. Update it after the first `main` deployment and the remaining production drills.
+This is a dated operator checkpoint, not a live health status. Confirm current GitHub and Oracle state before maintenance.
 
-As of 2026-07-15:
+As of 2026-07-22:
 
 - Oracle bootstrap is complete and the compiled scheduler is enabled and active.
 - The live scheduler uses `0 * * * *` and a full two-store synchronization completed successfully with zero extraction failures.
 - The GitHub environment is named `production`, permits only `main`, and contains exactly `OCI_DEPLOY_HOST`, `OCI_DEPLOY_USER`, `OCI_DEPLOY_SSH_PRIVATE_KEY`, and `OCI_DEPLOY_KNOWN_HOSTS`.
-- PR #2 verification passed. PR #2 still requires **Create a merge commit**; squash or rebase merge is invalid for this one-time migration.
-- The documented `main` branch protection rules still require confirmation before merge.
-- The first push-to-`main` deployment, reboot verification, and rollback/crash-recovery drill remain to be recorded after merge.
+- PR #2 merged with merge commit `7e31108c15a80bf9e7adad1ba5463f05d541af19` on 2026-07-15, completing the one-time ancestry migration.
+- The latest repository-recorded `main` Production Deployment completed successfully for `777d5714dc09d49a14f9f6048eb78e6ab1d81e45` on 2026-07-16.
+- Reboot verification and the production rollback/crash-recovery drill remain unrecorded. Verify them on Oracle before treating this checkpoint as current production-health evidence.
 
 No real host, spreadsheet ID, client credential, private key, or service-account content belongs in this checkpoint.
 
