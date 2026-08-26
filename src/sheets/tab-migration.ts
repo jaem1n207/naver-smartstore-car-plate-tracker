@@ -18,6 +18,10 @@ export type TabMigrationAction =
       readonly kind: "rename";
       readonly sheetId: number;
       readonly title: string;
+      readonly tableRename?: {
+        readonly tableId: string;
+        readonly name: string;
+      };
     }
   | {
       readonly kind: "add";
@@ -31,6 +35,8 @@ export function planTabMigrations(
 ): readonly TabMigrationAction[] {
   const sheetsByTitle = new Map<string, SheetTabMetadata>();
   const sheetsByTableName = collectManagedTables(definitions, sheets);
+  const managedTableNames = new Set(definitions.map((definition) => definition.tableName));
+  const ownersBySheetId = new Map<number, SheetTabDefinition>();
   const actions: TabMigrationAction[] = [];
 
   for (const sheet of sheets) {
@@ -60,10 +66,12 @@ export function planTabMigrations(
     }
 
     if (titledSheet !== undefined) {
+      claimSheet(titledSheet, definition, ownersBySheetId);
       continue;
     }
 
     if (tableSheet !== undefined) {
+      claimSheet(tableSheet, definition, ownersBySheetId);
       actions.push({
         kind: "rename",
         sheetId: tableSheet.sheetId,
@@ -75,10 +83,22 @@ export function planTabMigrations(
     const legacySheet = firstLegacySheet(definition, sheetsByTitle);
 
     if (legacySheet !== undefined) {
+      rejectForeignManagedTable(legacySheet, definition, managedTableNames);
+      claimSheet(legacySheet, definition, ownersBySheetId);
+      const adoptableTable = tableStartingAtFirstCell(legacySheet);
+
       actions.push({
         kind: "rename",
         sheetId: legacySheet.sheetId,
         title: definition.title,
+        ...(adoptableTable === undefined
+          ? {}
+          : {
+              tableRename: {
+                tableId: adoptableTable.tableId,
+                name: definition.tableName,
+              },
+            }),
       });
       continue;
     }
@@ -89,6 +109,8 @@ export function planTabMigrations(
       columnCount: definition.columnCount,
     });
   }
+
+  validateActions(actions);
 
   return actions;
 }
@@ -121,6 +143,69 @@ function collectManagedTables(
   }
 
   return sheetsByTableName;
+}
+
+function claimSheet(
+  sheet: SheetTabMetadata,
+  definition: SheetTabDefinition,
+  ownersBySheetId: Map<number, SheetTabDefinition>,
+): void {
+  const existingOwner = ownersBySheetId.get(sheet.sheetId);
+
+  if (existingOwner !== undefined && existingOwner.tableName !== definition.tableName) {
+    throw new Error(
+      `관리 시트 소유권 충돌: ${String(sheet.sheetId)}번 시트가 ` +
+        `"${existingOwner.tableName}" 및 "${definition.tableName}" 정의에 연결됩니다`,
+    );
+  }
+
+  ownersBySheetId.set(sheet.sheetId, definition);
+}
+
+function rejectForeignManagedTable(
+  sheet: SheetTabMetadata,
+  definition: SheetTabDefinition,
+  managedTableNames: ReadonlySet<string>,
+): void {
+  const foreignTable = sheet.tables.find(
+    (table) => managedTableNames.has(table.name) && table.name !== definition.tableName,
+  );
+
+  if (foreignTable === undefined) {
+    return;
+  }
+
+  throw new Error(
+    `관리 탭 소유권 충돌: "${sheet.title}" 탭에 ` + `"${foreignTable.name}" 관리 테이블이 있습니다`,
+  );
+}
+
+function tableStartingAtFirstCell(sheet: SheetTabMetadata): SheetTableMetadata | undefined {
+  const tables = sheet.tables.filter(
+    (table) => table.startRowIndex === 0 && table.startColumnIndex === 0,
+  );
+
+  if (tables.length > 1) {
+    throw new Error(`관리 탭 테이블 소유권이 모호합니다: "${sheet.title}"`);
+  }
+
+  return tables[0];
+}
+
+function validateActions(actions: readonly TabMigrationAction[]): void {
+  const migratedSheetIds = new Set<number>();
+
+  for (const action of actions) {
+    if (action.kind !== "rename") {
+      continue;
+    }
+
+    if (migratedSheetIds.has(action.sheetId)) {
+      throw new Error(`관리 시트 마이그레이션이 중복되었습니다: ${String(action.sheetId)}번`);
+    }
+
+    migratedSheetIds.add(action.sheetId);
+  }
 }
 
 function firstLegacySheet(

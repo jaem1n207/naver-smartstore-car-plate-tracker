@@ -90,6 +90,58 @@ describe("planTabMigrations", () => {
     ]);
   });
 
+  it("adopts and canonicalizes a legacy tab's existing A1 table", () => {
+    const tabs = createManagedSheetTabs(STORE_A_DISPLAY_NAME, NEW_STORE_B_DISPLAY_NAME);
+    const definition = definitionByTableName(tabs, "managed_store_b_inventory");
+    const sheet: SheetTabMetadata = {
+      sheetId: 12,
+      title: "B스토어 매물",
+      tables: [
+        {
+          tableId: "legacy-table-12",
+          name: "기존 B스토어 테이블",
+          startRowIndex: 0,
+          startColumnIndex: 0,
+        },
+      ],
+    };
+
+    expect(planTabMigrations([definition], [sheet])).toEqual([
+      {
+        kind: "rename",
+        sheetId: 12,
+        title: "베스트브릿지 (truckhub) 매물",
+        tableRename: {
+          tableId: "legacy-table-12",
+          name: "managed_store_b_inventory",
+        },
+      },
+    ]);
+  });
+
+  it("fails when a legacy candidate contains another definition's managed table", () => {
+    const tabs = createManagedSheetTabs(STORE_A_DISPLAY_NAME, NEW_STORE_B_DISPLAY_NAME);
+    const storeADefinition = definitionByTableName(tabs, "managed_store_a_inventory");
+    const storeBDefinition = definitionByTableName(tabs, "managed_store_b_inventory");
+    const sheet: SheetTabMetadata = {
+      sheetId: 13,
+      title: "B스토어 매물",
+      tables: [
+        {
+          tableId: "managed-table-13",
+          name: storeADefinition.tableName,
+          startRowIndex: 0,
+          startColumnIndex: 0,
+        },
+      ],
+    };
+
+    expect(() => planTabMigrations([storeADefinition, storeBDefinition], [sheet])).toThrow(
+      '관리 탭 소유권 충돌: "B스토어 매물" 탭에 ' +
+        '"managed_store_a_inventory" 관리 테이블이 있습니다',
+    );
+  });
+
   it("fails when a managed table has moved away from A1", () => {
     const oldTabs = createManagedSheetTabs(STORE_A_DISPLAY_NAME, OLD_STORE_B_DISPLAY_NAME);
     const newTabs = createManagedSheetTabs(STORE_A_DISPLAY_NAME, NEW_STORE_B_DISPLAY_NAME);
