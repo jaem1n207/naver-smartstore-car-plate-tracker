@@ -58,10 +58,11 @@ or production Sheet. Review visual diffs manually and never replace Linux snapsh
 
 Follow the history’s concise English imperative style, such as `Define duplicate view membership
 rules`; use a conventional prefix only when it matches nearby maintenance commits. Keep commits
-atomic. PRs should explain behavior and operational impact, link the issue when applicable, list
-commands run, and include screenshots or snapshot notes for visual changes. The `Verify` job must
-pass. Changes under `ops/deployment/`, `.github/workflows/`, or dependency manifests require
-owner review and may trigger the documented privileged-maintenance path.
+atomic. Merge PRs with **Create a merge commit**; never use squash merge or rebase merge. PRs
+should explain behavior and operational impact, link the issue when applicable, list commands run,
+and include screenshots or snapshot notes for visual changes. The `Verify` job must pass. Changes
+under `ops/deployment/`, `.github/workflows/`, or dependency manifests require owner review and
+may trigger the documented privileged-maintenance path.
 
 ## Security & Configuration
 
