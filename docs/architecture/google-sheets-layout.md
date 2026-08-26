@@ -125,7 +125,7 @@ changes. During sync:
 - Legacy generic Korean and English titles remain fallback migration candidates when no stable
   managed table is present.
 - A current title and its stable managed table on different sheets is a configuration conflict.
-  Initialization stops before any Sheet value write.
+  Initialization stops before Naver reads or Sheet value writes.
 - A table beginning at A1 is reused by its `tableId` and resized.
 - A missing table is created only when neither a current tab, stable managed table, nor legacy tab
   exists.
