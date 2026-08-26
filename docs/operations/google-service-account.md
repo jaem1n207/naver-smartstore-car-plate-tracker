@@ -113,6 +113,12 @@ Both Naver applications are `내스토어 애플리케이션`. The worker theref
 
 The worker combines each configured name and URL slug into the Sheets display label. For example, `동부트럭` plus `example-store-east` appears as `동부트럭 (example-store-east)`.
 
+`STORE_A_NAME` and `STORE_B_NAME` are mutable display configuration, not store identity. Before
+changing either value in the protected production environment, deploy a release that supports
+stable managed-table migration. The next successful full sync must rename the affected inventory,
+internal-duplicate, and cross-store tabs in place while preserving their sheet and table IDs. Do
+not delete old tabs or copy rows manually.
+
 ## Key incident response
 
 If the JSON is committed, pasted into chat, or otherwise exposed, disable or delete that key in Google Cloud immediately, create a replacement, update the server secret, and rerun the smoke test.
