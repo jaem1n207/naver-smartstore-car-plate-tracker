@@ -31,21 +31,24 @@ Run this only on a fixed-IP staging or production server.
 
 For a deliberate `STORE_A_NAME` or `STORE_B_NAME` change:
 
-1. Before editing the protected environment, record the affected inventory, internal-duplicate,
+1. Before editing the protected environment, create a root-only named backup of its current
+   contents without printing them. Retain the backup until migration verification succeeds, then
+   securely remove it.
+2. Before editing the protected environment, record the affected inventory, internal-duplicate,
    and cross-store tab titles, `sheetId` values, native `tableId` values, and current product-row
    count.
-2. Confirm the deployed release contains stable managed-table migration before changing the name.
-3. Change only the intended `STORE_*_NAME`; keep `STORE_*_BASE_URL`, store key, Naver credentials,
+3. Confirm the deployed release contains stable managed-table migration before changing the name.
+4. Change only the intended `STORE_*_NAME`; keep `STORE_*_BASE_URL`, store key, Naver credentials,
    and spreadsheet ID unchanged.
-4. Run one deliberate full sync with the scheduler stopped through the documented transient-unit
+5. Run one deliberate full sync with the scheduler stopped through the documented transient-unit
    procedure.
-5. Confirm the three affected tabs use the new configured display name and the old titles are
+6. Confirm the three affected tabs use the new configured display name and the old titles are
    absent.
-6. Confirm every recorded `sheetId` and `tableId` is unchanged, the inventory product IDs are
+7. Confirm every recorded `sheetId` and `tableId` is unchanged, the inventory product IDs are
    unchanged, and the current product-row count matches the pre-change count.
-7. Confirm the latest run-log row uses the new display name and the service resumes with no
+8. Confirm the latest run-log row uses the new display name and the service resumes with no
    `scheduled sync failed` record.
-8. On any conflict or sync failure, restore the protected environment backup before restarting the
+9. On any conflict or sync failure, restore the protected environment backup before restarting the
    scheduler. Do not delete, merge, or manually copy managed tabs.
 
 ## Sync output verification
