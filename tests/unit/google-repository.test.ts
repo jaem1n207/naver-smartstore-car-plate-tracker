@@ -9,7 +9,7 @@ import {
   sheetProductRowToOperatorValues,
   sheetProductRowToValues,
 } from "../../src/sheets/columns.js";
-import type { SheetTabDefinition } from "../../src/sheets/columns.js";
+import type { ManagedSheetTabs, SheetTabDefinition } from "../../src/sheets/columns.js";
 import type { GoogleSheetRepositoryOptions } from "../../src/sheets/google-repository.js";
 import type { RunLogRow, SheetProductRow, SheetRepository } from "../../src/sheets/types.js";
 
@@ -225,72 +225,7 @@ const googleapisMock = vi.hoisted(() => {
   function localizedSheetsResponse(): SpreadsheetResponse {
     return {
       data: {
-        sheets: [
-          {
-            properties: {
-              sheetId: 1,
-              title: "동부트럭 (store-east) 매물",
-              index: 0,
-              gridProperties: { columnCount: 12 },
-            },
-          },
-          {
-            properties: {
-              sheetId: 2,
-              title: "서부트럭 (store-west) 매물",
-              index: 1,
-              gridProperties: { columnCount: 12 },
-            },
-          },
-          {
-            properties: {
-              sheetId: 3,
-              title: "동부트럭 (store-east) 내부 차량번호 중복",
-              index: 2,
-              gridProperties: { columnCount: 12 },
-            },
-          },
-          {
-            properties: {
-              sheetId: 4,
-              title: "서부트럭 (store-west) 내부 차량번호 중복",
-              index: 3,
-              gridProperties: { columnCount: 12 },
-            },
-          },
-          {
-            properties: {
-              sheetId: 5,
-              title: "동부트럭 (store-east)·서부트럭 (store-west) 차량번호 중복",
-              index: 4,
-              gridProperties: { columnCount: 12 },
-            },
-          },
-          {
-            properties: {
-              sheetId: 6,
-              title: "원본 데이터",
-              index: 5,
-              gridProperties: { columnCount: 21 },
-            },
-          },
-          {
-            properties: {
-              sheetId: 7,
-              title: "차량번호 추출 실패",
-              index: 6,
-              gridProperties: { columnCount: 21 },
-            },
-          },
-          {
-            properties: {
-              sheetId: 8,
-              title: "실행 기록",
-              index: 7,
-              gridProperties: { columnCount: 8 },
-            },
-          },
-        ],
+        sheets: sheetsForManagedTabs(MANAGED_TABS),
       },
     };
   }
@@ -325,6 +260,8 @@ vi.mock("googleapis/build/src/apis/sheets/index.js", () => ({
 
 const STORE_A_DISPLAY_NAME = "동부트럭 (store-east)";
 const STORE_B_DISPLAY_NAME = "서부트럭 (store-west)";
+const OLD_STORE_B_DISPLAY_NAME = "트럭판매왕 화물특장 (truckhub)";
+const NEW_STORE_B_DISPLAY_NAME = "베스트브릿지 (truckhub)";
 const MANAGED_TABS = createManagedSheetTabs(STORE_A_DISPLAY_NAME, STORE_B_DISPLAY_NAME);
 
 const baseRow: SheetProductRow = {
@@ -486,6 +423,73 @@ describe("GoogleSheetRepository", () => {
         fields: "title",
       },
     });
+  });
+
+  it("renames configured store tabs and reuses their native tables", async () => {
+    const oldTabs = createManagedSheetTabs(STORE_A_DISPLAY_NAME, OLD_STORE_B_DISPLAY_NAME);
+    const newTabs = createManagedSheetTabs(STORE_A_DISPLAY_NAME, NEW_STORE_B_DISPLAY_NAME);
+    googleapisMock.queueSpreadsheetSheets(sheetsForManagedTabs(oldTabs));
+    googleapisMock.queueSpreadsheetSheets(sheetsForManagedTabs(newTabs));
+
+    for (let index = 0; index < 6; index += 1) {
+      googleapisMock.queueGetValues([]);
+    }
+
+    const repository = await createRepository({
+      storeBDisplayName: NEW_STORE_B_DISPLAY_NAME,
+    });
+
+    await repository.writeViews([baseRow]);
+
+    const bootstrapRequests = googleapisMock.batchUpdateCalls[0]?.requestBody?.requests ?? [];
+    expect(bootstrapRequests).toEqual([
+      {
+        updateSheetProperties: {
+          properties: { sheetId: 2, title: newTabs.names.storeBView },
+          fields: "title",
+        },
+      },
+      {
+        updateSheetProperties: {
+          properties: { sheetId: 4, title: newTabs.names.storeBDuplicates },
+          fields: "title",
+        },
+      },
+      {
+        updateSheetProperties: {
+          properties: { sheetId: 5, title: newTabs.names.acrossStoresDuplicates },
+          fields: "title",
+        },
+      },
+    ]);
+
+    const allRequests = googleapisMock.batchUpdateCalls.flatMap(
+      (call) => call.requestBody?.requests ?? [],
+    );
+    expect(allRequests.filter(hasAddTableRequest)).toEqual([]);
+    expect(
+      allRequests.filter(hasUpdateTableRequest).map((request) => request.updateTable.table.tableId),
+    ).toEqual(expect.arrayContaining(["managed-table-2", "managed-table-4", "managed-table-5"]));
+  });
+
+  it("fails before value access when the new title is already occupied", async () => {
+    const oldTabs = createManagedSheetTabs(STORE_A_DISPLAY_NAME, OLD_STORE_B_DISPLAY_NAME);
+    const newTabs = createManagedSheetTabs(STORE_A_DISPLAY_NAME, NEW_STORE_B_DISPLAY_NAME);
+    googleapisMock.queueSpreadsheetSheets([
+      ...sheetsForManagedTabs(oldTabs),
+      sheetMetadata(99, newTabs.names.storeBView, 8, 12),
+    ]);
+    const repository = await createRepository({
+      storeBDisplayName: NEW_STORE_B_DISPLAY_NAME,
+    });
+
+    await expect(repository.readRawData()).rejects.toThrow(
+      '관리 탭 제목 충돌: "베스트브릿지 (truckhub) 매물" 탭과 ' +
+        '"managed_store_b_inventory" 테이블이 서로 다른 시트에 있습니다',
+    );
+
+    expect(googleapisMock.batchUpdateCalls).toEqual([]);
+    expect(googleapisMock.valuesGetCalls).toEqual([]);
   });
 
   it("initializes tabs once per repository instance", async () => {
@@ -879,7 +883,7 @@ describe("GoogleSheetRepository", () => {
     ]);
   });
 
-  it("creates a native Google Sheets table for a managed view without one", async () => {
+  it("reuses a native Google Sheets table for a managed view", async () => {
     for (let index = 0; index < 6; index += 1) {
       googleapisMock.queueGetValues([]);
     }
@@ -890,18 +894,20 @@ describe("GoogleSheetRepository", () => {
     const requests = googleapisMock.batchUpdateCalls.flatMap(
       (call) => call.requestBody?.requests ?? [],
     );
-    const addTableRequest = requests
-      .filter(hasAddTableRequest)
-      .find((request) => request.addTable.table.name === "managed_store_a_inventory");
+    const updateTableRequest = requests
+      .filter(hasUpdateTableRequest)
+      .find((request) => request.updateTable.table.tableId === "managed-table-1");
 
-    expect(addTableRequest?.addTable.table).toMatchObject({
-      name: "managed_store_a_inventory",
-      range: {
-        sheetId: 1,
-        startRowIndex: 0,
-        endRowIndex: 2,
-        startColumnIndex: 0,
-        endColumnIndex: 12,
+    expect(updateTableRequest?.updateTable).toMatchObject({
+      table: {
+        tableId: "managed-table-1",
+        range: {
+          sheetId: 1,
+          startRowIndex: 0,
+          endRowIndex: 2,
+          startColumnIndex: 0,
+          endColumnIndex: 12,
+        },
       },
     });
   });
@@ -1079,13 +1085,15 @@ describe("GoogleSheetRepository", () => {
     const requests = googleapisMock.batchUpdateCalls.flatMap(
       (call) => call.requestBody?.requests ?? [],
     );
-    const updateTableRequest = requests
-      .filter(hasUpdateTableRequest)
-      .find((request) => request.updateTable.table.tableId === "101");
+    const updateTableRequests = requests.filter(
+      (request): request is UpdateTableRequestValue =>
+        hasUpdateTableRequest(request) && request.updateTable.table.tableId === "managed-table-8",
+    );
+    const updateTableRequest = updateTableRequests.at(-1);
 
     expect(updateTableRequest?.updateTable).toMatchObject({
       table: {
-        tableId: "101",
+        tableId: "managed-table-8",
         range: {
           sheetId: 8,
           startRowIndex: 0,
@@ -1434,20 +1442,40 @@ function blankRawDataRow(): string[] {
   return RAW_DATA_COLUMNS.map(() => "");
 }
 
+function sheetsForManagedTabs(
+  tabs: ManagedSheetTabs,
+): NonNullable<SpreadsheetResponse["data"]["sheets"]> {
+  return tabs.definitions.map((definition, index) => ({
+    ...sheetMetadata(index + 1, definition.title, index, definition.columnCount),
+    tables: [
+      {
+        tableId: `managed-table-${String(index + 1)}`,
+        name: definition.tableName,
+        range: {
+          sheetId: index + 1,
+          startRowIndex: 0,
+          endRowIndex: 2,
+          startColumnIndex: 0,
+          endColumnIndex: definition.columnCount,
+        },
+      },
+    ],
+  }));
+}
+
 function localizedSheetsWithStoreATable(): NonNullable<SpreadsheetResponse["data"]["sheets"]> {
-  return MANAGED_TABS.definitions.map((definition, index) => ({
-    properties: {
-      sheetId: index + 1,
-      title: definition.title,
-      index,
-      gridProperties: { columnCount: index === 0 ? 21 : definition.columnCount },
-    },
-    ...(index === 0
+  return sheetsForManagedTabs(MANAGED_TABS).map((sheet, index) =>
+    index === 0
       ? {
+          ...sheet,
+          properties: {
+            ...sheet.properties,
+            gridProperties: { columnCount: 21 },
+          },
           tables: [
             {
               tableId: "manual-store-a-table",
-              name: "기존 수동 테이블",
+              name: "managed_store_a_inventory",
               range: {
                 sheetId: 1,
                 startRowIndex: 0,
@@ -1458,25 +1486,40 @@ function localizedSheetsWithStoreATable(): NonNullable<SpreadsheetResponse["data
             },
           ],
         }
-      : {}),
-  }));
+      : sheet,
+  );
 }
 
 function legacySheetsWithManualDuplicateTable(): NonNullable<
   SpreadsheetResponse["data"]["sheets"]
 > {
-  return [
-    sheetMetadata(1, MANAGED_TABS.names.storeAView, 0, 21),
-    sheetMetadata(2, MANAGED_TABS.names.storeBView, 1, 21),
-    {
-      ...sheetMetadata(3, "스토어 내부 중복", 2, 21),
-      tables: [manualDuplicateTable(3)],
-    },
-    sheetMetadata(4, "동부트럭 (store-east)·서부트럭 (store-west) 공통 매물", 3, 21),
-    sheetMetadata(5, MANAGED_TABS.names.rawData, 4, 21),
-    sheetMetadata(6, MANAGED_TABS.names.extractionFailures, 5, 21),
-    sheetMetadata(7, MANAGED_TABS.names.runLog, 6, 8),
-  ];
+  return sheetsForManagedTabs(MANAGED_TABS).map((sheet, index) => {
+    if (index === 2) {
+      return {
+        ...sheet,
+        properties: {
+          ...sheet.properties,
+          title: "스토어 내부 중복",
+          gridProperties: { columnCount: 21 },
+        },
+        tables: [manualDuplicateTable(3)],
+      };
+    }
+
+    if (index === 4) {
+      return {
+        ...sheet,
+        properties: {
+          ...sheet.properties,
+          title: "동부트럭 (store-east)·서부트럭 (store-west) 공통 매물",
+          gridProperties: { columnCount: 21 },
+        },
+        tables: [],
+      };
+    }
+
+    return sheet;
+  });
 }
 
 function localizedSheetsWithMigratedDuplicateTable(): NonNullable<

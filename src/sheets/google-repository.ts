@@ -20,6 +20,11 @@ import {
 } from "./columns.js";
 import type { SheetTabDefinition, SheetTabNames } from "./columns.js";
 import {
+  planTabMigrations,
+  type SheetTabMetadata,
+  type TabMigrationAction,
+} from "./tab-migration.js";
+import {
   displayStatusStyle,
   duplicateStatusStyle,
   findDuplicateGroups,
@@ -229,25 +234,10 @@ export class GoogleSheetRepository implements SheetRepository {
 
   private async initializeTabs(): Promise<void> {
     const initialSheets = await this.fetchSheetMetadata();
-    const initialSheetIdsByTitle = collectSheetIdsByTitle(initialSheets);
-    const bootstrapRequests: sheets_v4.Schema$Request[] = [];
-
-    for (const tab of this.tabDefinitions) {
-      const localizedSheetId = initialSheetIdsByTitle.get(tab.title);
-
-      if (localizedSheetId !== undefined) {
-        continue;
-      }
-
-      const legacySheetId = firstExistingSheetId(initialSheetIdsByTitle, tab.legacyTitles);
-
-      if (legacySheetId !== undefined) {
-        bootstrapRequests.push(renameSheetRequest(legacySheetId, tab.title));
-        continue;
-      }
-
-      bootstrapRequests.push(addSheetRequest(tab.title, tab.columnCount));
-    }
+    const bootstrapRequests = planTabMigrations(
+      this.tabDefinitions,
+      sheetMetadataForMigration(initialSheets),
+    ).map(tabMigrationRequest);
 
     if (bootstrapRequests.length > 0) {
       await this.sheets.spreadsheets.batchUpdate({
@@ -402,21 +392,6 @@ export class GoogleSheetRepository implements SheetRepository {
   }
 }
 
-function firstExistingSheetId(
-  sheetIdsByTitle: ReadonlyMap<string, number>,
-  titles: readonly string[],
-): number | undefined {
-  for (const title of titles) {
-    const sheetId = sheetIdsByTitle.get(title);
-
-    if (sheetId !== undefined) {
-      return sheetId;
-    }
-  }
-
-  return undefined;
-}
-
 function rawDataValues(rows: SheetProductRow[]): string[][] {
   return [RAW_DATA_HEADERS, ...rows.map(sheetProductRowToValues)];
 }
@@ -498,23 +473,6 @@ function sheetRange(tabName: string, range: string): string {
   return `'${tabName.replaceAll("'", "''")}'!${range}`;
 }
 
-function collectSheetIdsByTitle(
-  sheets: sheets_v4.Schema$Sheet[] | null | undefined,
-): Map<string, number> {
-  const sheetIdsByTitle = new Map<string, number>();
-
-  for (const sheet of sheets ?? []) {
-    const sheetId = sheet.properties?.sheetId;
-    const title = sheet.properties?.title;
-
-    if (typeof sheetId === "number" && typeof title === "string") {
-      sheetIdsByTitle.set(title, sheetId);
-    }
-  }
-
-  return sheetIdsByTitle;
-}
-
 function renameSheetRequest(sheetId: number, title: string): sheets_v4.Schema$Request {
   return {
     updateSheetProperties: {
@@ -539,6 +497,51 @@ function addSheetRequest(title: string, columnCount: number): sheets_v4.Schema$R
       },
     },
   };
+}
+
+function sheetMetadataForMigration(sheets: readonly sheets_v4.Schema$Sheet[]): SheetTabMetadata[] {
+  const metadata: SheetTabMetadata[] = [];
+
+  for (const sheet of sheets) {
+    const sheetId = sheet.properties?.sheetId;
+    const title = sheet.properties?.title;
+
+    if (typeof sheetId !== "number" || typeof title !== "string") {
+      continue;
+    }
+
+    const tables = (sheet.tables ?? []).flatMap((table) => {
+      if (typeof table.tableId !== "string" || typeof table.name !== "string") {
+        return [];
+      }
+
+      return [
+        {
+          tableId: table.tableId,
+          name: table.name,
+          startRowIndex: table.range?.startRowIndex ?? 0,
+          startColumnIndex: table.range?.startColumnIndex ?? 0,
+        },
+      ];
+    });
+
+    metadata.push({
+      sheetId,
+      title,
+      tables,
+    });
+  }
+
+  return metadata;
+}
+
+function tabMigrationRequest(action: TabMigrationAction): sheets_v4.Schema$Request {
+  switch (action.kind) {
+    case "rename":
+      return renameSheetRequest(action.sheetId, action.title);
+    case "add":
+      return addSheetRequest(action.title, action.columnCount);
+  }
 }
 
 function createManagedLayoutRequests(
