@@ -52,6 +52,13 @@ export function planTabMigrations(
       );
     }
 
+    if (titledSheet !== undefined && tableSheet === undefined) {
+      throw new Error(
+        `관리 탭 제목 충돌: "${definition.title}" 탭에 ` +
+          `"${definition.tableName}" 관리 테이블이 없습니다`,
+      );
+    }
+
     if (titledSheet !== undefined) {
       continue;
     }
