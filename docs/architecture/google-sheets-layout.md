@@ -115,15 +115,25 @@ The next successful synchronization rewrites the derived duplicate tabs with the
 
 ## Native Tables And Migration
 
-Every managed range uses the Google Sheets native table feature. During sync:
+Every managed range uses the Google Sheets native table feature. The fixed managed table name is
+the stable identity; the human-readable tab title may change when a configured store display name
+changes. During sync:
 
+- A tab already using the current configured title remains in place.
+- If the current title is absent but the fixed managed table name exists, that table's sheet is
+  renamed in place. Its `sheetId`, `tableId`, values, notes, and formatting are preserved.
+- Legacy generic Korean and English titles remain fallback migration candidates when no stable
+  managed table is present.
+- A current title and its stable managed table on different sheets is a configuration conflict.
+  Initialization stops before Naver reads or Sheet value writes.
 - A table beginning at A1 is reused by its `tableId` and resized.
-- A missing table is created after its headers and rows are written.
+- A missing table is created only when neither a current tab, stable managed table, nor legacy tab
+  exists.
 - Empty views retain a header plus one blank table row.
 - Operator tables use 12 visible columns; stale columns M:U from previous 21-column views are cleared and hidden.
 - Obsolete row colors and duplicate borders are cleared before the current sync formatting is applied.
 - The former `스토어 내부 중복` tab migrates to the first configured store's internal duplicate tab.
-- Unknown tabs are preserved.
+- Unknown tabs without a managed table identity are preserved.
 
 The `실행 기록` header migration accepts only an empty sheet, the exact current 11-column header above, or this exact legacy 8-column header:
 

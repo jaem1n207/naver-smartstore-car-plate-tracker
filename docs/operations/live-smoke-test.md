@@ -27,6 +27,31 @@ Run this only on a fixed-IP staging or production server.
 13. Confirm a known asymmetric duplicate case: for a normalized plate with two active listings in one store and one in the other, the two same-store listings appear in that store's internal duplicate tab, the other store's internal duplicate tab has no row for that plate, and all three listings appear in the cross-store duplicate tab. Confirm the two internally duplicated rows retain `같은 스토어 + 두 스토어 중복` in both views.
 14. Review logs for `GW.IP_NOT_ALLOWED`, `GW.AUTHN`, `GW.RATE_LIMIT`, and `GW.QUOTA_LIMIT`.
 
+## Store display-name migration
+
+For a deliberate `STORE_A_NAME` or `STORE_B_NAME` change:
+
+1. Before editing the protected environment, create a root-only named backup of its current
+   contents without printing them. Retain the backup until migration verification succeeds, then
+   securely remove it.
+2. Before editing the protected environment, record the affected inventory, internal-duplicate,
+   and cross-store tab titles, `sheetId` values, native `tableId` values, and current product-row
+   count and exact `storeKey + channelProductNo` pair set.
+3. Confirm the deployed release contains stable managed-table migration before changing the name.
+4. Change only the intended `STORE_*_NAME`; keep `STORE_*_BASE_URL`, store key, Naver credentials,
+   and spreadsheet ID unchanged.
+5. Run one deliberate full sync with the scheduler stopped through the documented transient-unit
+   procedure.
+6. Confirm the three affected tabs use the new configured display name and the old titles are
+   absent.
+7. Confirm every recorded `sheetId` and `tableId` is unchanged, the current
+   `storeKey + channelProductNo` pair set exactly matches the pre-change set, and the current
+   product-row count matches the pre-change count.
+8. Confirm the latest run-log row uses the new display name and the service resumes with no
+   `scheduled sync failed` record.
+9. On any conflict or sync failure, restore the protected environment backup before restarting the
+   scheduler. Do not delete, merge, or manually copy managed tabs.
+
 ## Sync output verification
 
 The `sync:once` JSON log and scheduler log must expose only the explicit result fields `syncScope`, `selectedStores`, `syncedProductsThisRun`, `sheetTotalProducts`, `sheetExtractionSuccess`, `sheetExtractionFailure`, `sheetDuplicateProductRows`, and `summary`; the old ambiguous keys `totalProducts`, `successCount`, `failureCount`, and `duplicateCount` must be absent. Confirm that `syncedProductsThisRun` describes the requested stores in the current run, while the `sheet*` values describe the whole managed sheet. In particular, `sheetDuplicateProductRows` counts product rows with a non-unique status, not unique plate groups.
