@@ -472,6 +472,83 @@ describe("GoogleSheetRepository", () => {
     ).toEqual(expect.arrayContaining(["managed-table-2", "managed-table-4", "managed-table-5"]));
   });
 
+  it("canonicalizes an adopted legacy table once and reuses its IDs", async () => {
+    googleapisMock.queueSpreadsheetSheets(legacyRawSheetsWithManualTable());
+    googleapisMock.queueSpreadsheetSheets(localizedRawSheetsWithManualTable());
+    googleapisMock.queueGetValues([]);
+    const firstRepository = await createRepository();
+
+    await firstRepository.readRawData();
+
+    expect(googleapisMock.batchUpdateCalls[0]?.requestBody?.requests).toEqual([
+      {
+        updateSheetProperties: {
+          properties: {
+            sheetId: 6,
+            title: MANAGED_TABS.names.rawData,
+          },
+          fields: "title",
+        },
+      },
+      {
+        updateTable: {
+          table: {
+            tableId: "manual-raw-table",
+            name: "managed_raw_data",
+          },
+          fields: "name",
+        },
+      },
+    ]);
+
+    const firstInitializationBatchCount = googleapisMock.batchUpdateCalls.length;
+    googleapisMock.queueSpreadsheetSheets(localizedRawSheetsWithManualTable());
+    googleapisMock.queueGetValues([]);
+    const secondRepository = await createRepository();
+
+    await secondRepository.writeRawData([]);
+
+    const secondInitializationRequests =
+      googleapisMock.batchUpdateCalls[firstInitializationBatchCount]?.requestBody?.requests;
+    expect(secondInitializationRequests?.some(hasRenameSheetRequest)).toBe(false);
+    expect(
+      secondInitializationRequests?.some(
+        (request) => hasUpdateTableRequest(request) && request.updateTable.fields === "name",
+      ),
+    ).toBe(false);
+
+    const secondRepositoryRequests = googleapisMock.batchUpdateCalls
+      .slice(firstInitializationBatchCount)
+      .flatMap((call) => call.requestBody?.requests ?? []);
+    const managedTableUpdate = secondRepositoryRequests
+      .filter(hasUpdateTableRequest)
+      .find((request) => request.updateTable.fields === "range,columnProperties,rowsProperties");
+
+    expect(managedTableUpdate?.updateTable).toMatchObject({
+      table: {
+        tableId: "manual-raw-table",
+        range: {
+          sheetId: 6,
+        },
+      },
+      fields: "range,columnProperties,rowsProperties",
+    });
+  });
+
+  it("fails before mutation or value access when one sheet has multiple managed owners", async () => {
+    googleapisMock.queueSpreadsheetSheets(sheetsWithConflictingManagedOwners());
+    const repository = await createRepository();
+
+    await expect(repository.readRawData()).rejects.toThrow(
+      '관리 탭 소유권 충돌: "B스토어 매물" 탭에 ' +
+        '"managed_store_a_inventory" 관리 테이블이 있습니다',
+    );
+
+    expect(googleapisMock.batchUpdateCalls).toEqual([]);
+    expect(googleapisMock.valuesGetCalls).toEqual([]);
+    expect(googleapisMock.updateCalls).toEqual([]);
+  });
+
   it("fails before value access when the new title is already occupied", async () => {
     const oldTabs = createManagedSheetTabs(STORE_A_DISPLAY_NAME, OLD_STORE_B_DISPLAY_NAME);
     const newTabs = createManagedSheetTabs(STORE_A_DISPLAY_NAME, NEW_STORE_B_DISPLAY_NAME);
@@ -975,7 +1052,11 @@ describe("GoogleSheetRepository", () => {
     );
     const updateTableRequest = requests
       .filter(hasUpdateTableRequest)
-      .find((request) => request.updateTable.table.tableId === "manual-legacy-duplicates");
+      .find(
+        (request) =>
+          request.updateTable.table.tableId === "manual-legacy-duplicates" &&
+          request.updateTable.fields === "range,columnProperties,rowsProperties",
+      );
 
     expect(updateTableRequest?.updateTable.table).toMatchObject({
       tableId: "manual-legacy-duplicates",
@@ -1488,6 +1569,59 @@ function localizedSheetsWithStoreATable(): NonNullable<SpreadsheetResponse["data
         }
       : sheet,
   );
+}
+
+function legacyRawSheetsWithManualTable(): NonNullable<SpreadsheetResponse["data"]["sheets"]> {
+  return sheetsForManagedTabs(MANAGED_TABS).map((sheet, index) =>
+    index === 5
+      ? {
+          ...sheet,
+          properties: {
+            ...sheet.properties,
+            title: "RawData",
+          },
+          tables: [
+            {
+              ...sheet.tables?.[0],
+              tableId: "manual-raw-table",
+              name: "기존 원본 데이터 테이블",
+            },
+          ],
+        }
+      : sheet,
+  );
+}
+
+function localizedRawSheetsWithManualTable(): NonNullable<SpreadsheetResponse["data"]["sheets"]> {
+  return sheetsForManagedTabs(MANAGED_TABS).map((sheet, index) =>
+    index === 5
+      ? {
+          ...sheet,
+          tables: [
+            {
+              ...sheet.tables?.[0],
+              tableId: "manual-raw-table",
+            },
+          ],
+        }
+      : sheet,
+  );
+}
+
+function sheetsWithConflictingManagedOwners(): NonNullable<SpreadsheetResponse["data"]["sheets"]> {
+  return sheetsForManagedTabs(MANAGED_TABS)
+    .filter((_, index) => index !== 1)
+    .map((sheet, index) =>
+      index === 0
+        ? {
+            ...sheet,
+            properties: {
+              ...sheet.properties,
+              title: "B스토어 매물",
+            },
+          }
+        : sheet,
+    );
 }
 
 function legacySheetsWithManualDuplicateTable(): NonNullable<

@@ -237,7 +237,7 @@ export class GoogleSheetRepository implements SheetRepository {
     const bootstrapRequests = planTabMigrations(
       this.tabDefinitions,
       sheetMetadataForMigration(initialSheets),
-    ).map(tabMigrationRequest);
+    ).flatMap(tabMigrationRequests);
 
     if (bootstrapRequests.length > 0) {
       await this.sheets.spreadsheets.batchUpdate({
@@ -535,12 +535,27 @@ function sheetMetadataForMigration(sheets: readonly sheets_v4.Schema$Sheet[]): S
   return metadata;
 }
 
-function tabMigrationRequest(action: TabMigrationAction): sheets_v4.Schema$Request {
+function tabMigrationRequests(action: TabMigrationAction): sheets_v4.Schema$Request[] {
   switch (action.kind) {
-    case "rename":
-      return renameSheetRequest(action.sheetId, action.title);
+    case "rename": {
+      const requests = [renameSheetRequest(action.sheetId, action.title)];
+
+      if (action.tableRename !== undefined) {
+        requests.push({
+          updateTable: {
+            table: {
+              tableId: action.tableRename.tableId,
+              name: action.tableRename.name,
+            },
+            fields: "name",
+          },
+        });
+      }
+
+      return requests;
+    }
     case "add":
-      return addSheetRequest(action.title, action.columnCount);
+      return [addSheetRequest(action.title, action.columnCount)];
   }
 }
 
